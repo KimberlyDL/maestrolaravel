@@ -269,23 +269,24 @@ Route::middleware(['auth:api'])->group(function () {
 
     Route::get('/organizations', [OrganizationController::class, 'index']);
     Route::post('/organizations', [OrganizationController::class, 'store']);
+
+    Route::post('/organizations/join/request', [OrganizationController::class, 'joinRequest']);
+    Route::post('/organizations/join/invite', [OrganizationController::class, 'joinViaInvite']);
+
+    Route::get('/organizations/my-requests', [OrganizationController::class, 'myRequests']);
+    Route::delete('/organizations/requests/{requestId}', [OrganizationController::class, 'cancelRequest']);
+
     Route::get('/organizations/{organization}', [OrganizationController::class, 'show']);
 
     Route::get('/organizations/{organization}/members', [OrganizationController::class, 'members']);
     Route::post('/organizations/{organization}/members', [OrganizationController::class, 'addMember']);
 
-
     Route::delete('/organizations/{organization}/members/{user}', [OrganizationController::class, 'removeMember']);
     Route::patch('/organizations/{organization}/members/{user}/role', [OrganizationController::class, 'updateMemberRole']);
-
-    Route::post('/organizations/join/request', [OrganizationController::class, 'joinRequest']);
-    Route::post('/organizations/join/invite', [OrganizationController::class, 'joinViaInvite']);
 
     Route::post('/organizations/{organization}/generate-invite', [OrganizationController::class, 'generateInviteCode']);
     Route::delete('/organizations/{organization}/remove-invite', [OrganizationController::class, 'removeInviteCode']);
 
-    Route::get('/organizations/my-requests', [OrganizationController::class, 'myRequests']);
-    Route::delete('/organizations/requests/{requestId}', [OrganizationController::class, 'cancelRequest']);
 
 
 

@@ -26,6 +26,9 @@ class Organization extends Model
         'log_retention_days',
         'is_archived',
         'archived_at',
+        'location_address',
+        'location_lat',
+        'location_lng',
     ];
 
     protected $casts = [
@@ -36,8 +39,26 @@ class Organization extends Model
         'log_retention_days' => 'integer',
         'is_archived' => 'boolean',
         'archived_at' => 'datetime',
+        'location_lat' => 'decimal:7',
+        'location_lng' => 'decimal:7',
     ];
 
+    /**
+     * Get location as an object
+     */
+    public function getLocationAttribute()
+    {
+        if (!$this->location_lat || !$this->location_lng) {
+            return null;
+        }
+
+        return [
+            'address' => $this->location_address,
+            'lat' => (float) $this->location_lat,
+            'lng' => (float) $this->location_lng,
+        ];
+    }
+    
     /**
      * Primary member relation (users in this org) with pivot role.
      * Keep this as the canonical relation name used by controllers.

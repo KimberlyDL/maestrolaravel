@@ -14,9 +14,6 @@ use App\Services\ActivityLogger;
 class OrganizationController extends Controller
 {
 
-    /**
-     * Get organization details (public view with user status)
-     */
     public function show(Organization $organization)
     {
         $user = Auth::user();
@@ -50,6 +47,16 @@ class OrganizationController extends Controller
         // Get member count
         $memberCount = $organization->members()->count();
 
+        // Build location object
+        $location = null;
+        if ($organization->location_lat && $organization->location_lng) {
+            $location = [
+                'address' => $organization->location_address,
+                'lat' => (float) $organization->location_lat,
+                'lng' => (float) $organization->location_lng,
+            ];
+        }
+
         return response()->json([
             'id' => $organization->id,
             'name' => $organization->name,
@@ -58,27 +65,84 @@ class OrganizationController extends Controller
             'mission' => $organization->mission,
             'vision' => $organization->vision,
             'logo' => $organization->logo,
+            'logo_url' => $organization->logo_url,
             'website' => $organization->website,
             'members' => $memberCount,
             'user_status' => $userStatus,
             'user_role' => $userRole,
-            'location' => null, // Add if you have location data
+            'location' => $location,
         ]);
     }
-/**
- * Get the current user's pending join requests
- */
-public function myRequests(Request $request)
-{
-    $user = $request->user();
 
-    $requests = \DB::table('organization_join_requests')
-        ->where('user_id', $user->id)
-        ->where('status', 'pending')
-        ->get();
+    
+    // /**
+    //  * Get the current user's pending join requests
+    //  */
+    // public function myRequests(Request $request)
+    // {
+    //     $user = $request->user();
 
-    return response()->json($requests);
-}
+    //     $requests = \DB::table('organization_join_requests')
+    //         ->where('user_id', $user->id)
+    //         ->where('status', 'pending')
+    //         ->get();
+
+    //     return response()->json($requests);
+    // }
+
+    public function myRequests(Request $request)
+    {
+        $user = $request->user();
+
+        $requests = \DB::table('organization_join_requests as r')
+            ->join('organizations as o', 'o.id', '=', 'r.organization_id')
+            ->where('r.user_id', $user->id)
+            ->select(
+                'r.*',
+                'o.name as organization_name',
+                'o.slug as organization_slug'
+            )
+            ->orderBy('r.created_at', 'desc')
+            ->get();
+
+        return response()->json($requests);
+    }
+
+    /**
+     * Cancel a pending join request
+     */
+    public function cancelRequest(Request $request, $requestId)
+    {
+        $user = $request->user();
+
+        $joinRequest = \DB::table('organization_join_requests')
+            ->where('id', $requestId)
+            ->where('user_id', $user->id)
+            ->where('status', 'pending')
+            ->first();
+
+        if (!$joinRequest) {
+            return response()->json(['message' => 'Join request not found or already processed.'], 404);
+        }
+
+        \DB::table('organization_join_requests')
+            ->where('id', $requestId)
+            ->update([
+                'status' => 'cancelled',
+                'updated_at' => now(),
+            ]);
+
+        ActivityLogger::log(
+            $joinRequest->organization_id,
+            'join_request_cancelled',
+            subjectType: 'User',
+            subjectId: $user->id,
+            description: "{$user->name} cancelled their join request"
+        );
+
+        return response()->json(['message' => 'Join request cancelled successfully.']);
+    }
+
     /**
      * Get all members of an organization
      */
@@ -525,6 +589,7 @@ public function myRequests(Request $request)
             ], 200);
         }
     }
+
     /**
      * Admin generates a new invite code (replaces old)
      */

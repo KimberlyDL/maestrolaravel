@@ -7,6 +7,8 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Tymon\JWTAuth\Contracts\JWTSubject;
+use Illuminate\Support\Facades\DB;
+use App\Models\Permission;
 
 class User extends Authenticatable implements MustVerifyEmail, JWTSubject
 {
@@ -183,5 +185,133 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         $roles = (array) $roles;
         $pivot = $this->orgMemberships()->where('organization_id', $organizationId)->first();
         return $pivot && in_array($pivot->role, $roles, true);
+    }
+
+
+
+
+
+
+
+    /**
+     * Get user's permissions for a specific organization
+     */
+    public function permissionsForOrganization(int $organizationId): array
+    {
+        return DB::table('organization_user_permissions')
+            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
+            ->where('organization_user_permissions.organization_id', $organizationId)
+            ->where('organization_user_permissions.user_id', $this->id)
+            ->pluck('permissions.name')
+            ->toArray();
+    }
+
+    /**
+     * Check if user has a specific permission in an organization
+     */
+    public function hasPermission(int $organizationId, string $permission): bool
+    {
+        // Admins have all permissions
+        $role = $this->roleInOrg($organizationId);
+        if (in_array($role, ['admin', 'owner'])) {
+            return true;
+        }
+
+        return DB::table('organization_user_permissions')
+            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
+            ->where('organization_user_permissions.organization_id', $organizationId)
+            ->where('organization_user_permissions.user_id', $this->id)
+            ->where('permissions.name', $permission)
+            ->exists();
+    }
+
+    /**
+     * Check if user has ANY of the given permissions
+     */
+    public function hasAnyPermission(int $organizationId, array $permissions): bool
+    {
+        $role = $this->roleInOrg($organizationId);
+        if (in_array($role, ['admin', 'owner'])) {
+            return true;
+        }
+
+        return DB::table('organization_user_permissions')
+            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
+            ->where('organization_user_permissions.organization_id', $organizationId)
+            ->where('organization_user_permissions.user_id', $this->id)
+            ->whereIn('permissions.name', $permissions)
+            ->exists();
+    }
+
+    /**
+     * Check if user has ALL of the given permissions
+     */
+    public function hasAllPermissions(int $organizationId, array $permissions): bool
+    {
+        $role = $this->roleInOrg($organizationId);
+        if (in_array($role, ['admin', 'owner'])) {
+            return true;
+        }
+
+        $count = DB::table('organization_user_permissions')
+            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
+            ->where('organization_user_permissions.organization_id', $organizationId)
+            ->where('organization_user_permissions.user_id', $this->id)
+            ->whereIn('permissions.name', $permissions)
+            ->count();
+
+        return $count === count($permissions);
+    }
+
+    /**
+     * Grant permission to user in organization
+     */
+    public function grantPermission(int $organizationId, string $permissionName): void
+    {
+        $permission = Permission::where('name', $permissionName)->firstOrFail();
+
+        DB::table('organization_user_permissions')->insertOrIgnore([
+            'organization_id' => $organizationId,
+            'user_id' => $this->id,
+            'permission_id' => $permission->id,
+            'granted_by' => auth()->id(),
+            'granted_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    /**
+     * Revoke permission from user in organization
+     */
+    public function revokePermission(int $organizationId, string $permissionName): void
+    {
+        $permission = Permission::where('name', $permissionName)->first();
+        if (!$permission) return;
+
+        DB::table('organization_user_permissions')
+            ->where('organization_id', $organizationId)
+            ->where('user_id', $this->id)
+            ->where('permission_id', $permission->id)
+            ->delete();
+    }
+
+    /**
+     * Sync permissions for user in organization (replaces all)
+     */
+    public function syncPermissions(int $organizationId, array $permissionNames): void
+    {
+        DB::transaction(function () use ($organizationId, $permissionNames) {
+            // Remove existing permissions
+            DB::table('organization_user_permissions')
+                ->where('organization_id', $organizationId)
+                ->where('user_id', $this->id)
+                ->delete();
+
+            // Add new permissions
+            foreach ($permissionNames as $permissionName) {
+                $this->grantPermission($organizationId, $permissionName);
+            }
+        });
     }
 }

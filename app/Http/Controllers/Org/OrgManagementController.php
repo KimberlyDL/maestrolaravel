@@ -74,6 +74,16 @@ class OrgManagementController extends Controller
     {
         $this->authorize('manage', $organization);
 
+        // Build location object
+        $location = null;
+        if ($organization->location_lat && $organization->location_lng) {
+            $location = [
+                'address' => $organization->location_address,
+                'lat' => (float) $organization->location_lat,
+                'lng' => (float) $organization->location_lng,
+            ];
+        }
+
         return response()->json([
             'id' => $organization->id,
             'name' => $organization->name,
@@ -87,6 +97,7 @@ class OrgManagementController extends Controller
             'public_profile' => $organization->public_profile,
             'member_can_invite' => $organization->member_can_invite,
             'log_retention_days' => $organization->log_retention_days,
+            'location' => $location,
             'created_at' => $organization->created_at,
             'updated_at' => $organization->updated_at,
         ]);
@@ -101,23 +112,28 @@ class OrgManagementController extends Controller
 
         $data = $request->validate([
             'name' => 'sometimes|string|max:255',
-            'description' => 'sometimes|string|max:1000',
-            'mission' => 'sometimes|nullable|string|max:2000',
-            'vision' => 'sometimes|nullable|string|max:2000',
-            'website' => 'sometimes|nullable|url|max:500',
+            'description' => 'nullable|string|max:1000',
+            'mission' => 'nullable|string|max:1000',
+            'vision' => 'nullable|string|max:1000',
+            'website' => 'nullable|url|max:255',
+            'location_address' => 'nullable|string|max:500',
+            'location_lat' => 'nullable|numeric|between:-90,90',
+            'location_lng' => 'nullable|numeric|between:-180,180',
         ]);
 
         $organization->update($data);
 
         ActivityLogger::log(
             $organization->id,
-            'overview_updated',
-            description: 'Organization overview was updated'
+            'organization_updated',
+            subjectType: 'Organization',
+            subjectId: $organization->id,
+            description: "{$request->user()->name} updated organization details"
         );
 
         return response()->json([
-            'message' => 'Organization overview updated successfully',
-            'organization' => $organization
+            'message' => 'Organization updated successfully',
+            'organization' => $organization,
         ]);
     }
 
@@ -623,13 +639,13 @@ class OrgManagementController extends Controller
         if ($request->hasFile('image')) {
             $file = $request->file('image');
             $filename = 'announcements/' . $organization->id . '/' . uniqid() . '.' . $file->extension();
-            
+
             Storage::disk('s3')->put(
                 $filename,
                 file_get_contents($file->getRealPath()),
                 'public'
             );
-            
+
             $imagePath = $filename;
         }
 
@@ -715,13 +731,13 @@ class OrgManagementController extends Controller
 
             $file = $request->file('image');
             $filename = 'announcements/' . $organization->id . '/' . uniqid() . '.' . $file->extension();
-            
+
             Storage::disk('s3')->put(
                 $filename,
                 file_get_contents($file->getRealPath()),
                 'public'
             );
-            
+
             $updateData['image_path'] = $filename;
         }
 
@@ -840,7 +856,7 @@ class OrgManagementController extends Controller
 
         if ($userRole === 'admin') {
             $adminCount = $organization->members()->wherePivot('role', 'admin')->count();
-            
+
             if ($adminCount <= 1) {
                 // Check if a new admin is specified
                 $data = $request->validate([
@@ -860,7 +876,7 @@ class OrgManagementController extends Controller
                 ]);
 
                 $newAdmin = User::find($data['new_admin_id']);
-                
+
                 ActivityLogger::log(
                     $organization->id,
                     'ownership_transferred',
