@@ -9,11 +9,12 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Tymon\JWTAuth\Contracts\JWTSubject;
 use Illuminate\Support\Facades\DB;
 use App\Models\Permission;
+use App\Traits\HasOrganizationPermissions;
 
 class User extends Authenticatable implements MustVerifyEmail, JWTSubject
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, Notifiable, HasOrganizationPermissions;
 
     /**
      * The attributes that are mass assignable.

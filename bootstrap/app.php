@@ -19,6 +19,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(HandleCors::class);
         $middleware->alias([
             'verified.api' => \App\Http\Middleware\EnsureEmailIsVerifiedApi::class,
+            'org.permission' => \App\Http\Middleware\CheckOrgPermission::class,
+            'org.admin' => \App\Http\Middleware\CheckOrgAdmin::class,
+            'org.member' => \App\Http\Middleware\CheckOrgMember::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -1,8 +1,6 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Illuminate\Http\Request;
-
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\VerifyEmailController;
 use App\Http\Controllers\VerificationNotificationController;
@@ -11,472 +9,519 @@ use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\Auth\OAuthExchangeController;
-
-
-
-
-
+use App\Http\Controllers\PermissionController;
 use App\Http\Controllers\Review\DocumentController;
 use App\Http\Controllers\Review\ReviewRequestController;
 use App\Http\Controllers\Review\ReviewRecipientController;
 use App\Http\Controllers\Review\ReviewCommentController;
-
 use App\Http\Controllers\Review\OrganizationController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\Org\OrgManagementController;
-
 use App\Http\Controllers\Duty\DutyScheduleController;
 use App\Http\Controllers\Duty\DutyAssignmentController;
 use App\Http\Controllers\Duty\DutyAvailabilityController;
 use App\Http\Controllers\Duty\DutySwapController;
 use App\Http\Controllers\Duty\DutyTemplateController;
-
-// use App\Http\Controllers\Review\ReviewActionController;     // (new) simple index()
-// use App\Http\Controllers\Review\ReviewAttachmentController; // (new) store(), index()
-
-
-
 use App\Http\Controllers\DocumentShareController;
 use App\Http\Controllers\StorageController;
 
+/*
+|--------------------------------------------------------------------------
+| Authenticated Routes
+|--------------------------------------------------------------------------
+*/
+
 Route::middleware(['auth:api'])->group(function () {
 
+    /** =============================================================== */
+    /** ==================== Permission Management ==================== */
+    /** =============================================================== */
 
+    // Get all available permissions (any authenticated user)
+    Route::get('/permissions', [PermissionController::class, 'index']);
 
-    /** --------------------------------------------------------------- */
-    /** ==================== Permission Controller ==================== */
-    /** --------------------------------------------------------------- */
+    // Organization-specific permission routes (admin only)
+    Route::prefix('organizations/{organization}')->middleware('org.admin')->group(function () {
+        // Get all members with their permissions
+        Route::get('/permissions/members', [PermissionController::class, 'memberPermissions']);
 
-    // // Get all available permissions
-    // Route::get('/permissions', [PermissionController::class, 'index']);
+        // Get specific user's permissions
+        Route::get('/permissions/users/{user}', [PermissionController::class, 'userPermissions']);
 
-    // // Organization-specific permission routes
-    // Route::prefix('organizations/{organization}')->group(function () {
+        // Grant single permission
+        Route::post('/permissions/users/{user}/grant', [PermissionController::class, 'grantPermission']);
 
-    //     // Get all members with their permissions
-    //     Route::get('/permissions/members', [PermissionController::class, 'memberPermissions']);
+        // Revoke single permission
+        Route::post('/permissions/users/{user}/revoke', [PermissionController::class, 'revokePermission']);
 
-    //     // Get specific user's permissions
-    //     Route::get('/permissions/users/{user}', [PermissionController::class, 'userPermissions']);
+        // Bulk grant permissions (replaces all)
+        Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions']);
+    });
 
-    //     // Grant single permission
-    //     Route::post('/permissions/users/{user}/grant', [PermissionController::class, 'grantPermission']);
-
-    //     // Revoke single permission
-    //     Route::post('/permissions/users/{user}/revoke', [PermissionController::class, 'revokePermission']);
-
-    //     // Bulk grant permissions (replaces all)
-    //     Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions']);
-    // });
-
-
-    //     /*
-    //  * Example usage in your existing routes:
-    //  * 
-    //  * Update existing OrgManagementController routes to check permissions:
-    //  */
-
-    //     // Example: Update join request approval route
-    //     Route::post(
-    //         '/organizations/{organization}/join-requests/{request}/approve',
-    //         [OrgManagementController::class, 'approveRequest']
-    //     )->middleware(['auth:api', 'permission:approve_join_requests']);
-
-    //     // Example: Update announcement creation route
-    //     Route::post(
-    //         '/organizations/{organization}/announcements',
-    //         [OrgManagementController::class, 'createAnnouncement']
-    //     )->middleware(['auth:api', 'permission:create_announcements']);
-
-
-
-
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
     /** ============= Document Storage (Google Drive-like) ============ */
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
 
     // List documents/folders in organization storage
+    Route::get('/storage', [StorageController::class, 'index'])
+        ->middleware('org.permission:view_storage');
 
-    Route::get('/storage', [StorageController::class, 'index']);
-
-    // List public documents
+    // List public documents (any authenticated user)
     Route::get('/storage/public', [StorageController::class, 'publicIndex']);
 
     // Get storage statistics
-    Route::get('/storage/statistics', [StorageController::class, 'statistics']);
+    Route::get('/storage/statistics', [StorageController::class, 'statistics'])
+        ->middleware('org.permission:view_statistics');
 
     // Create folder
-    Route::post('/storage/folders', [StorageController::class, 'createFolder']);
+    Route::post('/storage/folders', [StorageController::class, 'createFolder'])
+        ->middleware('org.permission:create_folders');
 
-    // Upload file (uses DocumentController with context=storage)
-    Route::post('/storage/upload', [StorageController::class, 'upload']);
+    // Upload file
+    Route::post('/storage/upload', [StorageController::class, 'upload'])
+        ->middleware('org.permission:upload_documents');
 
     // Get document/folder details
-    Route::get('/storage/documents/{document}', [StorageController::class, 'show']);
+    Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
+        ->middleware('org.permission:view_storage');
 
-    // Update document/folder (rename, change visibility, etc.)
-    Route::patch('/storage/documents/{document}', [StorageController::class, 'update']);
+    // Update document/folder
+    Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
+        ->middleware('org.permission:upload_documents');
 
     // Delete document/folder
-    Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy']);
+    Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
+        ->middleware('org.permission:delete_documents');
 
     // Move document/folder
-    Route::post('/storage/documents/{document}/move', [StorageController::class, 'move']);
+    Route::post('/storage/documents/{document}/move', [StorageController::class, 'move'])
+        ->middleware('org.permission:upload_documents');
 
-    // Copy document (files only, not folders)
-    Route::post('/storage/documents/{document}/copy', [StorageController::class, 'copy']);
+    // Copy document
+    Route::post('/storage/documents/{document}/copy', [StorageController::class, 'copy'])
+        ->middleware('org.permission:upload_documents');
 
     /** Document Sharing */
-    Route::get('/storage/documents/{document}/share', [DocumentShareController::class, 'getShare']);
-    Route::patch('/storage/documents/{document}/share', [DocumentShareController::class, 'updateShare']);
-    Route::post('/storage/documents/{document}/share/revoke', [DocumentShareController::class, 'revokeShare']);
+    Route::get('/storage/documents/{document}/share', [DocumentShareController::class, 'getShare'])
+        ->middleware('org.permission:view_storage');
 
-    /** Document Versions (for storage context) */
-    Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion']);
-    Route::get('/storage/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion']);
+    Route::patch('/storage/documents/{document}/share', [DocumentShareController::class, 'updateShare'])
+        ->middleware('org.permission:manage_document_sharing');
 
+    Route::post('/storage/documents/{document}/share/revoke', [DocumentShareController::class, 'revokeShare'])
+        ->middleware('org.permission:manage_document_sharing');
 
+    /** Document Versions */
+    Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
+        ->middleware('org.permission:upload_documents');
 
+    Route::get('/storage/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion'])
+        ->middleware('org.permission:view_storage');
 
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
     /** ---------------- Legacy/Review Document Routes ---------------- */
-    /** --------------------------------------------------------------- */
-    // These remain for backward compatibility with review system
+    /** =============================================================== */
 
     // Get document details with all versions
     Route::get('/documents/{document}', [DocumentController::class, 'show']);
 
-    // Create new document (context determined by request)
-    Route::post('/documents', [DocumentController::class, 'store']);
+    // Create new document
+    Route::post('/documents', [DocumentController::class, 'store'])
+        ->middleware('org.permission:create_reviews');
 
     // Add new version to existing document
-    Route::post('/documents/{document}/versions', [DocumentController::class, 'addVersion']);
+    Route::post('/documents/{document}/versions', [DocumentController::class, 'addVersion'])
+        ->middleware('org.permission:create_reviews');
 
     // Download specific document version
     Route::get('/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion']);
 
-    // List documents in organization (supports context parameter)
-    Route::get('/org-documents', [DocumentController::class, 'index']);
+    // List documents in organization
+    Route::get('/org-documents', [DocumentController::class, 'index'])
+        ->middleware('org.permission:view_reviews');
 
-    /** Share/Access Control (works for both contexts) */
+    /** Share/Access Control */
     Route::get('/documents/{document}/share', [DocumentShareController::class, 'getShare']);
     Route::patch('/documents/{document}/share', [DocumentShareController::class, 'updateShare']);
     Route::post('/documents/{document}/share/revoke', [DocumentShareController::class, 'revokeShare']);
 
-
-
-
-
-
-    // Public routes (no auth required)
-    Route::get('/storage/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
-    Route::get('/storage/public/{token}/download', [DocumentController::class, 'downloadPublicVersion']);
-    Route::get('/documents/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
-    Route::get('/documents/public/{token}/download', [DocumentController::class, 'downloadPublicVersion']);
-
-
-
-
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
     /** ------------------ Review Requests (Threads) ------------------ */
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
 
-    // List with filters (publisher, reviewer, status, due range, search)
-    Route::get('/reviews', [ReviewRequestController::class, 'index']);
+    // List with filters
+    Route::get('/reviews', [ReviewRequestController::class, 'index'])
+        ->middleware('org.permission:view_reviews');
 
-    // Shortcut: reviewer’s assigned threads (optional)
-    // Route::get('/reviews/me/assigned', [ReviewRequestController::class, 'assignedToMe']);
-
-    // Create a thread (draft or directly sent depending on payload)
-    Route::post('/reviews', [ReviewRequestController::class, 'store']);
+    // Create a thread
+    Route::post('/reviews', [ReviewRequestController::class, 'store'])
+        ->middleware('org.permission:create_reviews');
 
     // Read a thread
-    Route::get('/reviews/{review}', [ReviewRequestController::class, 'show']);
+    Route::get('/reviews/{review}', [ReviewRequestController::class, 'show'])
+        ->middleware('org.permission:view_reviews');
 
-    // Update thread metadata (subject/body/due, add/remove recipients, etc.)
-    Route::patch('/reviews/{review}', [ReviewRequestController::class, 'update']);
+    // Update thread metadata
+    Route::patch('/reviews/{review}', [ReviewRequestController::class, 'update'])
+        ->middleware('org.permission:manage_reviews');
 
-    // --- State transitions (map to model helpers) ---
-    Route::post('/reviews/{review}/send',   [ReviewRequestController::class, 'send']);    // Draft → Sent
-    Route::post('/reviews/{review}/close',  [ReviewRequestController::class, 'close']);   // → Closed
-    Route::post('/reviews/{review}/reopen', [ReviewRequestController::class, 'reopen']);  // Final → InReview
-    // (Optional) request-changes transition
-    Route::post('/reviews/{review}/request-changes', [ReviewRequestController::class, 'requestChanges']);
+    // State transitions
+    Route::post('/reviews/{review}/send', [ReviewRequestController::class, 'send'])
+        ->middleware('org.permission:manage_reviews');
 
-    // Publisher uploads a **new main version** into this thread (repoint)
-    Route::post('/reviews/{review}/versions', [ReviewRequestController::class, 'attachNewVersion']);
+    Route::post('/reviews/{review}/close', [ReviewRequestController::class, 'close'])
+        ->middleware('org.permission:manage_reviews');
 
+    Route::post('/reviews/{review}/reopen', [ReviewRequestController::class, 'reopen'])
+        ->middleware('org.permission:manage_reviews');
 
+    Route::post('/reviews/{review}/request-changes', [ReviewRequestController::class, 'requestChanges'])
+        ->middleware('org.permission:manage_reviews');
 
-    /** --------------------------------------------------------------- */
+    // Attach new version
+    Route::post('/reviews/{review}/versions', [ReviewRequestController::class, 'attachNewVersion'])
+        ->middleware('org.permission:manage_reviews');
+
+    /** =============================================================== */
     /** -------------------- Per-Recipient Actions -------------------- */
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
 
-    // Route::patch(
-    //     '/reviews/{review}/recipients/{recipient}',
-    //     [ReviewRecipientController::class, 'update']
-    // );
+    // Remove recipient
+    Route::delete('/reviews/{review}/recipients/{recipient}', [ReviewRequestController::class, 'removeRecipient'])
+        ->middleware('org.permission:assign_reviewers');
 
-    // Remove recipient (reviewer)
-    Route::delete('/reviews/{review}/recipients/{recipient}', [ReviewRequestController::class, 'removeRecipient']);
-
-    // Update recipient (for due date changes)
-    Route::patch('/reviews/{review}/recipients/{recipient}', [ReviewRecipientController::class, 'update']);
+    // Update recipient
+    Route::patch('/reviews/{review}/recipients/{recipient}', [ReviewRecipientController::class, 'update'])
+        ->middleware('org.permission:assign_reviewers');
 
     // Remind recipient
-    Route::post('/reviews/{review}/recipients/{recipient}/remind', [ReviewRecipientController::class, 'remind']);
+    Route::post('/reviews/{review}/recipients/{recipient}/remind', [ReviewRecipientController::class, 'remind'])
+        ->middleware('org.permission:manage_reviews');
 
+    // Approve/Decline (reviewers can do this)
+    Route::post('/reviews/{review}/recipients/{recipient}/approve', [ReviewRecipientController::class, 'approve'])
+        ->middleware('org.permission:comment_on_reviews');
 
+    Route::post('/reviews/{review}/recipients/{recipient}/decline', [ReviewRecipientController::class, 'decline'])
+        ->middleware('org.permission:comment_on_reviews');
 
+    Route::patch('/reviews/{review}/recipients/{recipient}/view', [ReviewRecipientController::class, 'markViewed'])
+        ->middleware('org.permission:view_reviews');
 
-    Route::post('/reviews/{review}/recipients/{recipient}/remind',  [ReviewRecipientController::class, 'remind']);
-    Route::post('/reviews/{review}/recipients/{recipient}/approve', [ReviewRecipientController::class, 'approve']);
-    Route::post('/reviews/{review}/recipients/{recipient}/decline', [ReviewRecipientController::class, 'decline']);
-
-    // Change name to "view" and use PATCH (idempotent-ish)
-    Route::patch('/reviews/{review}/recipients/{recipient}/view',   [ReviewRecipientController::class, 'markViewed']);
-
-
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
     /** --------------------- Comments (threaded) --------------------- */
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
 
-    Route::get('/reviews/{review}/comments',  [ReviewCommentController::class, 'index']);
-    Route::post('/reviews/{review}/comments', [ReviewCommentController::class, 'store']);
-    Route::get(
-        '/reviews/{review}/recipients/{recipient}/comments',
-        [ReviewCommentController::class, 'recipientComments']
-    );
+    Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index'])
+        ->middleware('org.permission:view_reviews');
 
-    /** --------------------------------------------------------------- */
+    Route::post('/reviews/{review}/comments', [ReviewCommentController::class, 'store'])
+        ->middleware('org.permission:comment_on_reviews');
+
+    Route::get('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
+        ->middleware('org.permission:view_reviews');
+
+    /** =============================================================== */
     /** --------------------------- Actions --------------------------- */
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
 
-    // Activity log
-    Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog']);
-
-    // /** ---------------- Attachments (extra/supporting files) ---------------- */
-    // Route::get('/reviews/{review}/attachments',  [ReviewAttachmentController::class, 'index']); // optional
-    // Route::post('/reviews/{review}/attachments', [ReviewAttachmentController::class, 'store']);
-
-    // /** ---------------- Audit trail ---------------- */
-    // Route::get('/reviews/{review}/actions', [ReviewActionController::class, 'index']);
-
+    Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
+        ->middleware('org.permission:view_activity_logs');
 
     /** =============================================================== */
     /** ======================== Organizations ======================== */
     /** =============================================================== */
 
+    // List organizations (my orgs or others)
     Route::get('/organizations', [OrganizationController::class, 'index']);
+
+    // Create organization (any authenticated user)
     Route::post('/organizations', [OrganizationController::class, 'store']);
 
+    // Join requests (any authenticated user)
     Route::post('/organizations/join/request', [OrganizationController::class, 'joinRequest']);
     Route::post('/organizations/join/invite', [OrganizationController::class, 'joinViaInvite']);
-
     Route::get('/organizations/my-requests', [OrganizationController::class, 'myRequests']);
     Route::delete('/organizations/requests/{requestId}', [OrganizationController::class, 'cancelRequest']);
 
+    // View organization (public or member)
     Route::get('/organizations/{organization}', [OrganizationController::class, 'show']);
 
-    Route::get('/organizations/{organization}/members', [OrganizationController::class, 'members']);
-    Route::post('/organizations/{organization}/members', [OrganizationController::class, 'addMember']);
+    // View members (requires permission)
+    Route::get('/organizations/{organization}/members', [OrganizationController::class, 'members'])
+        ->middleware('org.permission:view_members');
 
-    Route::delete('/organizations/{organization}/members/{user}', [OrganizationController::class, 'removeMember']);
-    Route::patch('/organizations/{organization}/members/{user}/role', [OrganizationController::class, 'updateMemberRole']);
+    // Add member (admin only)
+    Route::post('/organizations/{organization}/members', [OrganizationController::class, 'addMember'])
+        ->middleware('org.admin');
 
-    Route::post('/organizations/{organization}/generate-invite', [OrganizationController::class, 'generateInviteCode']);
-    Route::delete('/organizations/{organization}/remove-invite', [OrganizationController::class, 'removeInviteCode']);
+    // Remove member (requires permission)
+    Route::delete('/organizations/{organization}/members/{user}', [OrganizationController::class, 'removeMember'])
+        ->middleware('org.permission:remove_members');
 
+    // Update member role (requires permission)
+    Route::patch('/organizations/{organization}/members/{user}/role', [OrganizationController::class, 'updateMemberRole'])
+        ->middleware('org.permission:manage_member_roles');
 
+    // Invite code management (requires permission)
+    Route::post('/organizations/{organization}/generate-invite', [OrganizationController::class, 'generateInviteCode'])
+        ->middleware('org.permission:manage_invite_codes');
 
+    Route::delete('/organizations/{organization}/remove-invite', [OrganizationController::class, 'removeInviteCode'])
+        ->middleware('org.permission:manage_invite_codes');
 
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
     /** ---------- Organization Management (Admin Dashboard) ---------- */
-    /** --------------------------------------------------------------- */
+    /** =============================================================== */
 
     Route::prefix('org/{organization}')->group(function () {
-        // Dashboard & Overview
-        Route::get('/dashboard', [OrgManagementController::class, 'dashboard']);
-        Route::get('/overview', [OrgManagementController::class, 'overview']);
-        Route::patch('/overview', [OrgManagementController::class, 'updateOverview']);
 
-        // Settings Management (NEW)
-        Route::patch('/settings', [OrgManagementController::class, 'updateSettings']);
+        // Dashboard (any member)
+        Route::get('/dashboard', [OrgManagementController::class, 'dashboard'])
+            ->middleware('org.member');
+
+        // Overview (requires permission to view)
+        Route::get('/overview', [OrgManagementController::class, 'overview'])
+            ->middleware('org.permission:view_org_settings');
+
+        Route::patch('/overview', [OrgManagementController::class, 'updateOverview'])
+            ->middleware('org.permission:edit_org_profile');
+
+        // Settings Management
+        Route::patch('/settings', [OrgManagementController::class, 'updateSettings'])
+            ->middleware('org.permission:manage_org_settings');
 
         // Logo Management
-        Route::post('/logo', [OrgManagementController::class, 'uploadLogo']);
-        Route::delete('/logo', [OrgManagementController::class, 'deleteLogo']);
+        Route::post('/logo', [OrgManagementController::class, 'uploadLogo'])
+            ->middleware('org.permission:upload_org_logo');
+
+        Route::delete('/logo', [OrgManagementController::class, 'deleteLogo'])
+            ->middleware('org.permission:upload_org_logo');
 
         // Members Management
-        Route::get('/members', [OrgManagementController::class, 'members']);
-        Route::patch('/members/{user}/role', [OrgManagementController::class, 'updateMemberRole']);
-        Route::delete('/members/{user}', [OrgManagementController::class, 'removeMember']);
+        Route::get('/members', [OrgManagementController::class, 'members'])
+            ->middleware('org.permission:view_members');
+
+        Route::patch('/members/{user}/role', [OrgManagementController::class, 'updateMemberRole'])
+            ->middleware('org.permission:manage_member_roles');
+
+        Route::delete('/members/{user}', [OrgManagementController::class, 'removeMember'])
+            ->middleware('org.permission:remove_members');
 
         // Join Requests
-        Route::get('/join-requests', [OrgManagementController::class, 'joinRequests']);
-        Route::post('/join-requests/{requestId}/approve', [OrgManagementController::class, 'approveRequest']);
-        Route::post('/join-requests/{requestId}/decline', [OrgManagementController::class, 'declineRequest']);
+        Route::get('/join-requests', [OrgManagementController::class, 'joinRequests'])
+            ->middleware('org.permission:approve_join_requests');
+
+        Route::post('/join-requests/{requestId}/approve', [OrgManagementController::class, 'approveRequest'])
+            ->middleware('org.permission:approve_join_requests');
+
+        Route::post('/join-requests/{requestId}/decline', [OrgManagementController::class, 'declineRequest'])
+            ->middleware('org.permission:approve_join_requests');
 
         // Invite Management
-        Route::post('/generate-invite', [OrgManagementController::class, 'generateInviteCode']);
-        Route::delete('/remove-invite', [OrgManagementController::class, 'removeInviteCode']);
+        Route::post('/generate-invite', [OrgManagementController::class, 'generateInviteCode'])
+            ->middleware('org.permission:manage_invite_codes');
+
+        Route::delete('/remove-invite', [OrgManagementController::class, 'removeInviteCode'])
+            ->middleware('org.permission:manage_invite_codes');
 
         // Announcements
-        Route::get('/announcements', [OrgManagementController::class, 'announcements']);
-        Route::post('/announcements', [OrgManagementController::class, 'createAnnouncement']);
-        Route::patch('/announcements/{announcementId}', [OrgManagementController::class, 'updateAnnouncement']);
-        Route::delete('/announcements/{announcementId}', [OrgManagementController::class, 'deleteAnnouncement']);
+        Route::get('/announcements', [OrgManagementController::class, 'announcements'])
+            ->middleware('org.permission:view_announcements');
+
+        Route::post('/announcements', [OrgManagementController::class, 'createAnnouncement'])
+            ->middleware('org.permission:create_announcements');
+
+        Route::patch('/announcements/{announcementId}', [OrgManagementController::class, 'updateAnnouncement'])
+            ->middleware('org.permission:edit_announcements');
+
+        Route::delete('/announcements/{announcementId}', [OrgManagementController::class, 'deleteAnnouncement'])
+            ->middleware('org.permission:delete_announcements');
 
         // Statistics & Activity
-        Route::get('/statistics', [OrgManagementController::class, 'statistics']);
-        Route::get('/activity-log', [OrgManagementController::class, 'activityLog']);
+        Route::get('/statistics', [OrgManagementController::class, 'statistics'])
+            ->middleware('org.permission:view_statistics');
 
-        // Data Export (NEW)
-        Route::get('/export-data', [OrgManagementController::class, 'exportData']);
+        Route::get('/activity-log', [OrgManagementController::class, 'activityLog'])
+            ->middleware('org.permission:view_activity_logs');
 
-        // Archive/Restore (NEW)
-        Route::post('/archive', [OrgManagementController::class, 'archiveOrganization']);
-        Route::post('/restore', [OrgManagementController::class, 'restoreOrganization']);
+        // Data Export
+        Route::get('/export-data', [OrgManagementController::class, 'exportData'])
+            ->middleware('org.permission:export_data');
 
-        // Ownership Transfer (NEW)
-        Route::post('/transfer-ownership', [OrgManagementController::class, 'initiateOwnershipTransfer']);
-        Route::post('/transfer-ownership/{transferId}/accept', [OrgManagementController::class, 'acceptOwnershipTransfer']);
-        Route::post('/transfer-ownership/{transferId}/decline', [OrgManagementController::class, 'declineOwnershipTransfer']);
+        // Archive/Restore
+        Route::post('/archive', [OrgManagementController::class, 'archiveOrganization'])
+            ->middleware('org.permission:archive_organization');
 
-        // Leave Organization
-        Route::post('/leave', [OrgManagementController::class, 'leave']);
+        Route::post('/restore', [OrgManagementController::class, 'restoreOrganization'])
+            ->middleware('org.permission:archive_organization');
 
+        // Ownership Transfer
+        Route::post('/transfer-ownership', [OrgManagementController::class, 'initiateOwnershipTransfer'])
+            ->middleware('org.permission:transfer_ownership');
 
+        Route::post('/transfer-ownership/{transferId}/accept', [OrgManagementController::class, 'acceptOwnershipTransfer'])
+            ->middleware('org.member');
 
+        Route::post('/transfer-ownership/{transferId}/decline', [OrgManagementController::class, 'declineOwnershipTransfer'])
+            ->middleware('org.member');
 
-        Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments']);
+        // Leave Organization (any member)
+        Route::post('/leave', [OrgManagementController::class, 'leave'])
+            ->middleware('org.member');
+
+        /** =========================================================== */
+        /** ==================== Duty Management ====================== */
+        /** =========================================================== */
+
+        // My assignments (any member)
+        Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments'])
+            ->middleware('org.member');
 
         // Duty Schedules
-        Route::get('/duty-schedules', [DutyScheduleController::class, 'index']);
-        Route::post('/duty-schedules', [DutyScheduleController::class, 'store']);
-        Route::get('/duty-schedules/calendar', [DutyScheduleController::class, 'calendar']);
+        Route::get('/duty-schedules', [DutyScheduleController::class, 'index'])
+            ->middleware('org.permission:view_duty_schedules');
 
-        // Admin Statistics
-        Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics']);
-        // NEW: Member Statistics
-        Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics']);
+        Route::post('/duty-schedules', [DutyScheduleController::class, 'store'])
+            ->middleware('org.permission:create_duty_schedules');
 
-        // Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics']);
-        Route::get('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'show']);
-        Route::patch('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'update']);
-        Route::delete('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'destroy']);
-        Route::post('/duty-schedules/{dutySchedule}/duplicate', [DutyScheduleController::class, 'duplicate']);
+        Route::get('/duty-schedules/calendar', [DutyScheduleController::class, 'calendar'])
+            ->middleware('org.permission:view_duty_schedules');
+
+        Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics'])
+            ->middleware('org.permission:view_statistics');
+
+        Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics'])
+            ->middleware('org.member');
+
+        Route::get('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'show'])
+            ->middleware('org.permission:view_duty_schedules');
+
+        Route::patch('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'update'])
+            ->middleware('org.permission:edit_duty_schedules');
+
+        Route::delete('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'destroy'])
+            ->middleware('org.permission:delete_duty_schedules');
+
+        Route::post('/duty-schedules/{dutySchedule}/duplicate', [DutyScheduleController::class, 'duplicate'])
+            ->middleware('org.permission:create_duty_schedules');
 
         // Assignments
-        Route::post('/duty-schedules/{dutySchedule}/assignments', [DutyAssignmentController::class, 'store']);
-        Route::patch('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'update']);
-        Route::delete('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'destroy']);
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/respond', [DutyAssignmentController::class, 'respond']);
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-in', [DutyAssignmentController::class, 'checkIn']);
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-out', [DutyAssignmentController::class, 'checkOut']);
+        Route::post('/duty-schedules/{dutySchedule}/assignments', [DutyAssignmentController::class, 'store'])
+            ->middleware('org.permission:assign_duties');
 
-        // Availability
-        Route::get('/duty-availability', [DutyAvailabilityController::class, 'index']);
-        Route::post('/duty-availability', [DutyAvailabilityController::class, 'store']);
-        Route::patch('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'update']);
-        Route::delete('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'destroy']);
+        Route::patch('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'update'])
+            ->middleware('org.permission:assign_duties');
 
+        Route::delete('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'destroy'])
+            ->middleware('org.permission:assign_duties');
 
+        // Member self-service (any member)
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/respond', [DutyAssignmentController::class, 'respond'])
+            ->middleware('org.member');
+
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-in', [DutyAssignmentController::class, 'checkIn'])
+            ->middleware('org.member');
+
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-out', [DutyAssignmentController::class, 'checkOut'])
+            ->middleware('org.member');
+
+        // Availability (any member)
+        Route::get('/duty-availability', [DutyAvailabilityController::class, 'index'])
+            ->middleware('org.member');
+
+        Route::post('/duty-availability', [DutyAvailabilityController::class, 'store'])
+            ->middleware('org.member');
+
+        Route::patch('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'update'])
+            ->middleware('org.member');
+
+        Route::delete('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'destroy'])
+            ->middleware('org.member');
 
         // Swap Requests
-        Route::get('/duty-swaps', [DutySwapController::class, 'index']);
-        Route::post('/duty-assignments/{dutyAssignment}/swap', [DutySwapController::class, 'store']);
-        // NEW: Member swap actions
-        Route::post('/duty-swaps/{swapRequest}/accept', [DutySwapController::class, 'accept']);
-        Route::post('/duty-swaps/{swapRequest}/decline', [DutySwapController::class, 'decline']);
-        // Admin swap review
-        Route::post('/duty-swaps/{swapRequest}/cancel', [DutySwapController::class, 'cancel']);
-        Route::post('/duty-swaps/{swapRequest}/review', [DutySwapController::class, 'review']);
+        Route::get('/duty-swaps', [DutySwapController::class, 'index'])
+            ->middleware('org.permission:view_duty_schedules');
 
-        // // Swap Requests
-        // Route::get('/duty-swaps', [DutySwapController::class, 'index']);
-        // Route::post('/duty-assignments/{dutyAssignment}/swap', [DutySwapController::class, 'store']);
-        // Route::post('/duty-swaps/{swapRequest}/accept', [DutySwapController::class, 'accept']);
-        // Route::post('/duty-swaps/{swapRequest}/decline', [DutySwapController::class, 'decline']);
-        // Route::post('/duty-swaps/{swapRequest}/cancel', [DutySwapController::class, 'cancel']);
+        Route::post('/duty-assignments/{dutyAssignment}/swap', [DutySwapController::class, 'store'])
+            ->middleware('org.member');
 
-        // // Admin Swap Review - requires approve_duty_swaps permission
-        // Route::post('/duty-swaps/{swapRequest}/review', [DutySwapController::class, 'review'])
-        //     ->middleware('can:approveDutySwaps,organization');
+        Route::post('/duty-swaps/{swapRequest}/accept', [DutySwapController::class, 'accept'])
+            ->middleware('org.member');
 
+        Route::post('/duty-swaps/{swapRequest}/decline', [DutySwapController::class, 'decline'])
+            ->middleware('org.member');
 
+        Route::post('/duty-swaps/{swapRequest}/cancel', [DutySwapController::class, 'cancel'])
+            ->middleware('org.member');
+
+        Route::post('/duty-swaps/{swapRequest}/review', [DutySwapController::class, 'review'])
+            ->middleware('org.permission:approve_duty_swaps');
 
         // Templates
-        Route::get('/duty-templates', [DutyTemplateController::class, 'index']);
-        Route::post('/duty-templates', [DutyTemplateController::class, 'store']);
-        Route::patch('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'update']);
-        Route::delete('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'destroy']);
+        Route::get('/duty-templates', [DutyTemplateController::class, 'index'])
+            ->middleware('org.permission:view_duty_schedules');
 
-        // // Templates - requires manage_duty_schedules permission
-        // Route::get('/duty-templates', [DutyTemplateController::class, 'index']);
-        // Route::post('/duty-templates', [DutyTemplateController::class, 'store'])
-        //     ->middleware('can:manageDutySchedules,organization');
-        // Route::patch('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'update'])
-        //     ->middleware('can:manageDutySchedules,organization');
-        // Route::delete('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'destroy'])
-        //     ->middleware('can:manageDutySchedules,organization');
+        Route::post('/duty-templates', [DutyTemplateController::class, 'store'])
+            ->middleware('org.permission:manage_duty_templates');
+
+        Route::patch('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'update'])
+            ->middleware('org.permission:manage_duty_templates');
+
+        Route::delete('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'destroy'])
+            ->middleware('org.permission:manage_duty_templates');
     });
 
+    /** =============================================================== */
+    /** ---------------- Global Announcements (Public) ---------------- */
+    /** =============================================================== */
 
-
-
-    /** ---------------- Announcements ---------------- */
     Route::get('/announcements', [AnnouncementController::class, 'index']);
-    Route::post('/announcements', [AnnouncementController::class, 'store']);
+    Route::post('/announcements', [AnnouncementController::class, 'store'])
+        ->middleware('org.permission:create_announcements');
 
+    /** =============================================================== */
+    /** ======================== Me Endpoints ========================= */
+    /** =============================================================== */
 
-
-
-
-
-    // ========================
-    // ========================
-    // Me Endpoints
-    // ========================
-    // ========================
-
-    Route::get('/me',       [AuthController::class, 'me']);
-    Route::post('/logout',  [AuthController::class, 'logout']);
+    Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/logout', [AuthController::class, 'logout']);
     Route::post('/refresh', [AuthController::class, 'refresh']);
-
-    Route::put('/me/profile',  [ProfileController::class, 'update']);
-    Route::post('/me/avatar',  [ProfileController::class, 'uploadAvatar']);
+    Route::put('/me/profile', [ProfileController::class, 'update']);
+    Route::post('/me/avatar', [ProfileController::class, 'uploadAvatar']);
     Route::post('/me/password', [ProfileController::class, 'changePassword']);
 });
 
+/*
+|--------------------------------------------------------------------------
+| Public Routes (No Authentication Required)
+|--------------------------------------------------------------------------
+*/
 
+// Public document access
+Route::get('/storage/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
+Route::get('/storage/public/{token}/download', [DocumentController::class, 'downloadPublicVersion']);
+Route::get('/documents/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
+Route::get('/documents/public/{token}/download', [DocumentController::class, 'downloadPublicVersion']);
 
-// Public auth endpoints
+// Auth endpoints
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:6,1');
-Route::post('/login',    [AuthController::class, 'login'])->middleware('throttle:12,1');
-
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:12,1');
 Route::post('/forgot-password', [PasswordResetController::class, 'sendResetLink']);
-Route::post('/reset-password',  [PasswordResetController::class, 'reset']);
-
+Route::post('/reset-password', [PasswordResetController::class, 'reset']);
 Route::post('/email/verification-notification', [VerificationNotificationController::class, 'store'])
     ->middleware('throttle:6,1');
-
 Route::get('/email/verify/{id}/{hash}', [VerifyEmailController::class, 'verify'])
     ->middleware(['signed', 'throttle:6,1'])
     ->name('verification.verify');
 
-// Google OAuth (API style, stateless)
+// Google OAuth
 Route::prefix('auth')->group(function () {
-    Route::get('/google/redirect',  [SocialAuthController::class, 'redirectToGoogle']);
-    Route::get('/google/callback',  [SocialAuthController::class, 'handleGoogleCallback']);
+    Route::get('/google/redirect', [SocialAuthController::class, 'redirectToGoogle']);
+    Route::get('/google/callback', [SocialAuthController::class, 'handleGoogleCallback']);
 });
 
-// One-time code → JWT
 Route::post('/oauth/exchange', [OAuthExchangeController::class, 'exchange']);
-
-
-
-
 
 // Misc
 Route::post('/upload', [UploadController::class, 'upload']);
