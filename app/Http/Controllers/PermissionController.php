@@ -28,7 +28,7 @@ class PermissionController extends Controller
                         'description' => $p->description,
                         'category' => $p->category,
                     ];
-                });
+                })->values();
             });
 
         return response()->json($permissions);
@@ -43,21 +43,23 @@ class PermissionController extends Controller
             ->select('users.id', 'users.name', 'users.email', 'users.avatar', 'users.avatar_url', 'organization_user.role')
             ->get()
             ->map(function ($user) use ($organization) {
-                $isAdmin = $user->pivot->role === 'admin';
+                $isAdmin = in_array($user->pivot->role, ['admin', 'owner']);
 
                 $permissions = [];
                 $permissionIds = [];
+                $permissionNames = [];
 
                 if (!$isAdmin) {
                     $userPermissions = DB::table('organization_user_permissions')
                         ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
                         ->where('organization_user_permissions.organization_id', $organization->id)
                         ->where('organization_user_permissions.user_id', $user->id)
-                        ->select('permissions.id', 'permissions.display_name')
+                        ->select('permissions.id', 'permissions.name', 'permissions.display_name')
                         ->get();
 
                     $permissions = $userPermissions->pluck('display_name')->toArray();
                     $permissionIds = $userPermissions->pluck('id')->toArray();
+                    $permissionNames = $userPermissions->pluck('name')->toArray();
                 }
 
                 return [
@@ -67,8 +69,9 @@ class PermissionController extends Controller
                     'avatar' => $user->avatar ?? $user->avatar_url,
                     'role' => $user->pivot->role,
                     'is_admin' => $isAdmin,
-                    'permissions' => $permissions,
-                    'permission_ids' => $permissionIds,
+                    'permissions' => $permissions, // Display names for UI
+                    'permission_ids' => $permissionIds, // IDs for checkboxes
+                    'permission_names' => $permissionNames, // Names for backend operations
                     'permissions_count' => count($permissions),
                 ];
             });
@@ -87,7 +90,7 @@ class PermissionController extends Controller
 
         $userRole = $organization->getUserRole($user->id);
 
-        if ($userRole === 'admin') {
+        if (in_array($userRole, ['admin', 'owner'])) {
             return response()->json([
                 'user_id' => $user->id,
                 'is_admin' => true,
@@ -124,8 +127,8 @@ class PermissionController extends Controller
         }
 
         $userRole = $organization->getUserRole($user->id);
-        if ($userRole === 'admin') {
-            return response()->json(['message' => 'Cannot modify permissions for admin users'], 422);
+        if (in_array($userRole, ['admin', 'owner'])) {
+            return response()->json(['message' => 'Cannot modify permissions for admin/owner users'], 422);
         }
 
         $permission = Permission::where('name', $data['permission_name'])->first();
@@ -220,8 +223,8 @@ class PermissionController extends Controller
         }
 
         $userRole = $organization->getUserRole($user->id);
-        if ($userRole === 'admin') {
-            return response()->json(['message' => 'Cannot modify permissions for admin users'], 422);
+        if (in_array($userRole, ['admin', 'owner'])) {
+            return response()->json(['message' => 'Cannot modify permissions for admin/owner users'], 422);
         }
 
         DB::beginTransaction();
@@ -235,14 +238,14 @@ class PermissionController extends Controller
 
             // Add new permissions
             if (!empty($data['permissions'])) {
-                $permissionIds = Permission::whereIn('name', $data['permissions'])->pluck('id');
+                $permissions = Permission::whereIn('name', $data['permissions'])->get();
 
                 $inserts = [];
-                foreach ($permissionIds as $permissionId) {
+                foreach ($permissions as $permission) {
                     $inserts[] = [
                         'organization_id' => $organization->id,
                         'user_id' => $user->id,
-                        'permission_id' => $permissionId,
+                        'permission_id' => $permission->id,
                         'granted_by' => Auth::id(),
                         'granted_at' => now(),
                         'created_at' => now(),
@@ -270,6 +273,7 @@ class PermissionController extends Controller
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
+            \Log::error('Failed to update permissions: ' . $e->getMessage());
             return response()->json(['message' => 'Failed to update permissions'], 500);
         }
     }

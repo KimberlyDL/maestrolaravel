@@ -21,12 +21,14 @@ class OrganizationController extends Controller
         // Determine user's relationship to this org
         $userStatus = 'none';
         $userRole = null;
+        $userId = null; // ← Add this
 
         if ($user) {
             $membership = $organization->memberships()->where('user_id', $user->id)->first();
             if ($membership) {
                 $userStatus = 'member';
                 $userRole = $membership->role;
+                $userId = $user->id; // ← Add this
                 if ($userRole === 'admin') {
                     $userStatus = 'admin';
                 }
@@ -70,11 +72,12 @@ class OrganizationController extends Controller
             'members' => $memberCount,
             'user_status' => $userStatus,
             'user_role' => $userRole,
+            'user_id' => $userId, // ← Add this
             'location' => $location,
         ]);
     }
 
-    
+
     // /**
     //  * Get the current user's pending join requests
     //  */

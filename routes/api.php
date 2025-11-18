@@ -37,26 +37,30 @@ Route::middleware(['auth:api'])->group(function () {
     /** ==================== Permission Management ==================== */
     /** =============================================================== */
 
-    // Get all available permissions (any authenticated user)
-    Route::get('/permissions', [PermissionController::class, 'index']);
+    // Permission routes - OUTSIDE org prefix to match /organizations/ path
+    Route::prefix('organizations/{organization}')->group(function () {
+        // Get all available permissions (any authenticated user)
+        Route::get('/permissions', [PermissionController::class, 'index']);
 
-    // Organization-specific permission routes (admin only)
-    Route::prefix('organizations/{organization}')->middleware('org.admin')->group(function () {
-        // Get all members with their permissions
-        Route::get('/permissions/members', [PermissionController::class, 'memberPermissions']);
+        // Get all members with their permissions (requires manage_permissions)
+        Route::get('/permissions/members', [PermissionController::class, 'memberPermissions'])
+            ->middleware('org.permission:manage_permissions');
 
-        // Get specific user's permissions
-        Route::get('/permissions/users/{user}', [PermissionController::class, 'userPermissions']);
+        // Get specific user's permissions (any member can check - for UI)
+        Route::get('/permissions/users/{user}', [PermissionController::class, 'userPermissions'])
+            ->middleware('org.member');
 
-        // Grant single permission
-        Route::post('/permissions/users/{user}/grant', [PermissionController::class, 'grantPermission']);
+        // Grant/revoke (requires manage_permissions)
+        Route::post('/permissions/users/{user}/grant', [PermissionController::class, 'grantPermission'])
+            ->middleware('org.permission:manage_permissions');
 
-        // Revoke single permission
-        Route::post('/permissions/users/{user}/revoke', [PermissionController::class, 'revokePermission']);
+        Route::post('/permissions/users/{user}/revoke', [PermissionController::class, 'revokePermission'])
+            ->middleware('org.permission:manage_permissions');
 
-        // Bulk grant permissions (replaces all)
-        Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions']);
+        Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions'])
+            ->middleware('org.permission:manage_permissions');
     });
+
 
     /** =============================================================== */
     /** ============= Document Storage (Google Drive-like) ============ */
@@ -276,6 +280,24 @@ Route::middleware(['auth:api'])->group(function () {
 
     Route::prefix('org/{organization}')->group(function () {
 
+        // Get all members with their permissions (requires manage_permissions)
+        Route::get('/permissions/members', [PermissionController::class, 'memberPermissions'])
+            ->middleware('org.permission:manage_permissions');
+
+        // Get specific user's permissions (any member can check - for UI)
+        Route::get('/permissions/users/{user}', [PermissionController::class, 'userPermissions'])
+            ->middleware('org.member'); // ✅ Changed to org.member
+
+        // Grant/revoke (requires manage_permissions)
+        Route::post('/permissions/users/{user}/grant', [PermissionController::class, 'grantPermission'])
+            ->middleware('org.permission:manage_permissions');
+
+        Route::post('/permissions/users/{user}/revoke', [PermissionController::class, 'revokePermission'])
+            ->middleware('org.permission:manage_permissions');
+
+        Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions'])
+            ->middleware('org.permission:manage_permissions');
+
         // Dashboard (any member)
         Route::get('/dashboard', [OrgManagementController::class, 'dashboard'])
             ->middleware('org.member');
@@ -283,6 +305,7 @@ Route::middleware(['auth:api'])->group(function () {
         // Overview (requires permission to view)
         Route::get('/overview', [OrgManagementController::class, 'overview'])
             ->middleware('org.permission:view_org_settings');
+        // ->middleware('org.member');
 
         Route::patch('/overview', [OrgManagementController::class, 'updateOverview'])
             ->middleware('org.permission:edit_org_profile');
