@@ -496,12 +496,28 @@ Route::middleware(['auth:api'])->group(function () {
     });
 
     /** =============================================================== */
-    /** ---------------- Global Announcements (Public) ---------------- */
+    /** ------------ Global Announcements (Authenticated) ------------ */
     /** =============================================================== */
 
-    Route::get('/announcements', [AnnouncementController::class, 'index']);
+    // Paginated feed for infinite scroll (NEW - preferred endpoint)
+    Route::get('/announcements/feed', [AnnouncementController::class, 'feed'])
+        ->middleware('auth:api');
+
+    // Legacy endpoint (maintained for compatibility)
+    Route::get('/announcements', [AnnouncementController::class, 'index'])
+        ->middleware('auth:api');
+
+    // Create announcement (admin only)
     Route::post('/announcements', [AnnouncementController::class, 'store'])
-        ->middleware('org.permission:create_announcements');
+        ->middleware(['auth:api', 'org.permission:create_announcements']);
+
+    // Update announcement (admin only)
+    Route::patch('/announcements/{id}', [AnnouncementController::class, 'update'])
+        ->middleware(['auth:api', 'org.permission:edit_announcements']);
+
+    // Delete announcement (admin only)
+    Route::delete('/announcements/{id}', [AnnouncementController::class, 'destroy'])
+        ->middleware(['auth:api', 'org.permission:delete_announcements']);
 
     /** =============================================================== */
     /** ======================== Me Endpoints ========================= */
