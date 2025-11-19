@@ -300,7 +300,7 @@ class OrgManagementController extends Controller
     }
 
     /**
-     * Approve join request
+     * Approve join request - AUTO-GRANTS DEFAULT PERMISSIONS
      */
     public function approveRequest(Request $request, Organization $organization, $requestId)
     {
@@ -330,15 +330,23 @@ class OrgManagementController extends Controller
             return response()->json(['message' => 'User is already a member.'], 400);
         }
 
-        DB::transaction(function () use ($organization, $joinRequest, $data) {
+        $role = $data['role'] ?? 'member';
+
+        DB::transaction(function () use ($organization, $joinRequest, $data, $role) {
+            // Add user to organization
             DB::table('organization_user')->insert([
                 'organization_id' => $organization->id,
                 'user_id' => $joinRequest->user_id,
-                'role' => $data['role'] ?? 'member',
+                'role' => $role,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
 
+            // ✅ AUTO-GRANT DEFAULT PERMISSIONS
+            $user = User::find($joinRequest->user_id);
+            \App\Services\DefaultPermissions::grantDefaultPermissions($organization, $user, $role);
+
+            // Update join request status
             DB::table('organization_join_requests')
                 ->where('id', $joinRequest->id)
                 ->update([
@@ -356,8 +364,8 @@ class OrgManagementController extends Controller
             'member_added',
             subjectType: 'User',
             subjectId: $joinRequest->user_id,
-            metadata: ['role' => $data['role'] ?? 'member'],
-            description: "{$user->name} was added as a member"
+            metadata: ['role' => $role, 'auto_permissions_granted' => true],
+            description: "{$user->name} was added as {$role} with default permissions"
         );
 
         return response()->json([
@@ -447,7 +455,7 @@ class OrgManagementController extends Controller
     }
 
     /**
-     * Update member role
+     * Update member role - AUTOMATICALLY ADJUSTS PERMISSIONS
      */
     public function updateMemberRole(Request $request, Organization $organization, User $user)
     {
@@ -463,6 +471,7 @@ class OrgManagementController extends Controller
 
         $oldRole = $organization->getUserRole($user->id);
 
+        // Prevent demoting last admin
         if ($oldRole === 'admin' && $data['role'] !== 'admin') {
             $adminCount = $organization->members()->wherePivot('role', 'admin')->count();
             if ($adminCount <= 1) {
@@ -472,23 +481,39 @@ class OrgManagementController extends Controller
             }
         }
 
+        // Prevent self-demotion
         if ($user->id === Auth::id() && $data['role'] !== 'admin') {
             return response()->json([
                 'message' => 'You cannot change your own role'
             ], 422);
         }
 
-        $organization->members()->updateExistingPivot($user->id, [
-            'role' => $data['role'],
-        ]);
+        DB::transaction(function () use ($organization, $user, $data, $oldRole) {
+            // Update role
+            $organization->members()->updateExistingPivot($user->id, [
+                'role' => $data['role'],
+            ]);
+
+            // ✅ AUTO-UPDATE PERMISSIONS BASED ON NEW ROLE
+            \App\Services\DefaultPermissions::updatePermissionsOnRoleChange(
+                $organization,
+                $user,
+                $oldRole,
+                $data['role']
+            );
+        });
 
         ActivityLogger::log(
             $organization->id,
             'member_role_updated',
             subjectType: 'User',
             subjectId: $user->id,
-            metadata: ['old_role' => $oldRole, 'new_role' => $data['role']],
-            description: "{$user->name}'s role was updated to {$data['role']}"
+            metadata: [
+                'old_role' => $oldRole,
+                'new_role' => $data['role'],
+                'permissions_updated' => true
+            ],
+            description: "{$user->name}'s role was updated from {$oldRole} to {$data['role']}"
         );
 
         return response()->json([

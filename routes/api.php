@@ -105,22 +105,79 @@ Route::middleware(['auth:api'])->group(function () {
     Route::post('/storage/documents/{document}/copy', [StorageController::class, 'copy'])
         ->middleware('org.permission:upload_documents');
 
-    /** Document Sharing */
-    Route::get('/storage/documents/{document}/share', [DocumentShareController::class, 'getShare'])
-        ->middleware('org.permission:view_storage');
+    // /** Document Sharing */
+    // Route::get('/storage/documents/{document}/share', [DocumentShareController::class, 'getShare'])
+    //     ->middleware('org.permission:view_storage');
 
-    Route::patch('/storage/documents/{document}/share', [DocumentShareController::class, 'updateShare'])
-        ->middleware('org.permission:manage_document_sharing');
+    // Route::patch('/storage/documents/{document}/share', [DocumentShareController::class, 'updateShare'])
+    //     ->middleware('org.permission:manage_document_sharing');
 
-    Route::post('/storage/documents/{document}/share/revoke', [DocumentShareController::class, 'revokeShare'])
-        ->middleware('org.permission:manage_document_sharing');
+    // Route::post('/storage/documents/{document}/share/revoke', [DocumentShareController::class, 'revokeShare'])
+    //     ->middleware('org.permission:manage_document_sharing');
+
+
+    /** Enhanced Document Sharing - Storage Context */
+    Route::prefix('storage/documents/{document}')->group(function () {
+
+        // Get share configuration
+        // User needs: view_storage permission OR be document owner
+        Route::get('/share', [DocumentShareController::class, 'getShare'])
+            ->middleware('org.permission:view_storage');
+
+        // Update share settings (password, expiry, download limits, IP restrictions)
+        // User needs: manage_document_sharing permission OR be document owner
+        Route::patch('/share', [DocumentShareController::class, 'updateShare'])
+            ->middleware('org.permission:manage_document_sharing');
+
+        // Revoke share link
+        // User needs: manage_document_sharing permission OR be document owner
+        Route::post('/share/revoke', [DocumentShareController::class, 'revokeShare'])
+            ->middleware('org.permission:manage_document_sharing');
+
+        // Get share statistics (views, downloads, etc.)
+        // User needs: view_storage permission OR be document owner
+        Route::get('/share/stats', [DocumentShareController::class, 'getShareStats'])
+            ->middleware('org.permission:view_storage');
+
+        // Get access logs for this share
+        // User needs: view_storage permission OR be document owner
+        Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs'])
+            ->middleware('org.permission:view_storage');
+    });
+
+    // Maintain backward compatibility with document sharing (review context)
+    Route::prefix('documents/{document}')->group(function () {
+        Route::get('/share', [DocumentShareController::class, 'getShare']);
+        Route::patch('/share', [DocumentShareController::class, 'updateShare']);
+        Route::post('/share/revoke', [DocumentShareController::class, 'revokeShare']);
+        Route::get('/share/stats', [DocumentShareController::class, 'getShareStats']);
+        Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs']);
+    });
+
+
 
     /** Document Versions */
     Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
         ->middleware('org.permission:upload_documents');
 
-    Route::get('/storage/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion'])
+    // Route::get('/storage/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion'])
+    //     ->middleware('org.permission:view_storage');
+
+
+    // Download specific document version (authenticated users only)
+    Route::get(
+        '/storage/documents/{document}/versions/{version}/download',
+        [DocumentController::class, 'downloadVersion']
+    )
         ->middleware('org.permission:view_storage');
+
+    Route::get(
+        '/documents/{document}/versions/{version}/download',
+        [DocumentController::class, 'downloadVersion']
+    );
+
+
+
 
     /** =============================================================== */
     /** ---------------- Legacy/Review Document Routes ---------------- */
@@ -536,12 +593,52 @@ Route::middleware(['auth:api'])->group(function () {
 | Public Routes (No Authentication Required)
 |--------------------------------------------------------------------------
 */
+Route::prefix('share')->group(function () {
 
-// Public document access
+    /**
+     * GET /share/{token}
+     * Get shared document metadata (public access with security checks)
+     * 
+     * Security checks performed:
+     * - Token validity
+     * - Expiry date
+     * - IP whitelist (if configured)
+     * - Password (if configured)
+     * - Download limits
+     * 
+     * Query Parameters:
+     * - password: Required if share has password protection
+     * 
+     * Example: /api/share/abc123def456?password=myPassword
+     */
+    Route::get('/{token}', [DocumentShareController::class, 'getPublicDocument'])
+        ->name('documents.public-access');
+
+    /**
+     * GET /share/{token}/download
+     * Download shared document (public access with security checks)
+     * 
+     * Same security checks as getPublicDocument()
+     * Increments download counter if download limit is set
+     * Logs the download attempt
+     * 
+     * Returns file with correct MIME type and filename
+     * 
+     * Query Parameters:
+     * - password: Required if share has password protection
+     * 
+     * Example: /api/share/abc123def456/download?password=myPassword
+     */
+    Route::get('/{token}/download', [DocumentShareController::class, 'downloadPublicDocument'])
+        ->name('documents.public-download');
+});
+
+
+// Legacy routes for backward compatibility
 Route::get('/storage/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
-Route::get('/storage/public/{token}/download', [DocumentController::class, 'downloadPublicVersion']);
+Route::get('/storage/public/{token}/download', [DocumentShareController::class, 'downloadPublicDocument']);
 Route::get('/documents/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
-Route::get('/documents/public/{token}/download', [DocumentController::class, 'downloadPublicVersion']);
+Route::get('/documents/public/{token}/download', [DocumentShareController::class, 'downloadPublicDocument']);
 
 // Auth endpoints
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:6,1');

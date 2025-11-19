@@ -7,7 +7,7 @@ use App\Models\Document;
 
 class DocumentPolicy
 {
-    /* ==================== Review Context ==================== */
+    /* ==================== REVIEW CONTEXT ==================== */
 
     public function createDocument(User $user, int $organizationId)
     {
@@ -59,7 +59,7 @@ class DocumentPolicy
         return $user->organizations()->where('organizations.id', $organizationId)->exists();
     }
 
-    /* ==================== Storage Context ==================== */
+    /* ==================== STORAGE CONTEXT ==================== */
 
     /**
      * View storage documents in organization
@@ -117,7 +117,7 @@ class DocumentPolicy
     }
 
     /**
-     * Share document (org members/admins only)
+     * Share document - owner or org members with permission
      */
     public function share(User $user, Document $document): bool
     {
@@ -126,13 +126,62 @@ class DocumentPolicy
             return false;
         }
 
-        // Owner can share
+        // Document owner can always share
         if ($document->uploaded_by === $user->id || $document->created_by === $user->id) {
             return true;
         }
 
-        // Org members can share org documents
+        // Check if user is org member with manage_document_sharing permission
+        $isMember = $user->organizations()->where('organizations.id', $document->organization_id)->exists();
+
+        if (!$isMember) {
+            return false;
+        }
+
+        // Get user role to check if admin (admins can share any document)
         $userRole = $document->organization->getUserRole($user->id);
-        return in_array($userRole, ['admin', 'member', 'owner']);
+        if (in_array($userRole, ['admin', 'owner'])) {
+            return true;
+        }
+
+        // Otherwise, check explicit permission (if permission system is being used)
+        // This will fall through to permission middleware check
+        return false;
+    }
+
+    /**
+     * Update document sharing settings
+     * Same as share() - owner or admin or person with permission
+     */
+    public function updateShare(User $user, Document $document): bool
+    {
+        return $this->share($user, $document);
+    }
+
+    /**
+     * Revoke document share
+     * Same as share() - owner or admin
+     */
+    public function revokeShare(User $user, Document $document): bool
+    {
+        return $this->share($user, $document);
+    }
+
+    /**
+     * View share statistics
+     * Same as share() - only owner or admin can see stats
+     */
+    public function viewShareStats(User $user, Document $document): bool
+    {
+        return $this->share($user, $document);
+    }
+
+    /**
+     * View share access logs
+     * Same as share() - only owner or admin can see logs
+     */
+    public function viewShareLogs(User $user, Document $document): bool
+    {
+        return $this->share($user, $document);
     }
 }
