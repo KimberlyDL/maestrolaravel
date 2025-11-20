@@ -31,6 +31,8 @@ class DefaultPermissions
         return [
             // Only view_announcements is granted by default
             // This allows members to see the Overview tab only
+            'view_storage',
+            'view_members',
             'view_announcements',
         ];
     }
@@ -41,6 +43,7 @@ class DefaultPermissions
     private static function getViewerPermissions(): array
     {
         return [
+            'view_members',
             'view_announcements',
         ];
     }

@@ -361,8 +361,8 @@ Route::middleware(['auth:api'])->group(function () {
 
         // Overview (requires permission to view)
         Route::get('/overview', [OrgManagementController::class, 'overview'])
-            ->middleware('org.permission:view_org_settings');
-        // ->middleware('org.member');
+            // ->middleware('org.permission:view_org_settings');
+            ->middleware('org.member');
 
         Route::patch('/overview', [OrgManagementController::class, 'updateOverview'])
             ->middleware('org.permission:edit_org_profile');
@@ -380,7 +380,11 @@ Route::middleware(['auth:api'])->group(function () {
 
         // Members Management
         Route::get('/members', [OrgManagementController::class, 'members'])
-            ->middleware('org.permission:view_members');
+            // ->middleware('org.permission:view_members');
+            ->middleware('org.member');
+
+        Route::get('/members/{user}', [OrgManagementController::class, 'showMember'])
+            ->middleware('org.member');
 
         Route::patch('/members/{user}/role', [OrgManagementController::class, 'updateMemberRole'])
             ->middleware('org.permission:manage_member_roles');
@@ -407,7 +411,8 @@ Route::middleware(['auth:api'])->group(function () {
 
         // Announcements
         Route::get('/announcements', [OrgManagementController::class, 'announcements'])
-            ->middleware('org.permission:view_announcements');
+            // ->middleware('org.permission:view_announcements');
+            ->middleware('org.member');
 
         Route::post('/announcements', [OrgManagementController::class, 'createAnnouncement'])
             ->middleware('org.permission:create_announcements');
@@ -550,6 +555,51 @@ Route::middleware(['auth:api'])->group(function () {
 
         Route::delete('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'destroy'])
             ->middleware('org.permission:manage_duty_templates');
+
+
+
+        /** =============================================================== */
+        /** ============= Document Storage (Google Drive-like) ============ */
+        /** =============================================================== */
+
+        // Storage Access (Index, Stats) - Uses the {organization} parameter
+        Route::get('/storage', [StorageController::class, 'index'])
+            ->middleware('org.permission:view_storage');
+
+        Route::get('/storage/statistics', [StorageController::class, 'statistics'])
+            ->middleware('org.permission:view_statistics');
+
+        // Storage Management (Create, Upload)
+        Route::post('/storage/folders', [StorageController::class, 'createFolder'])
+            ->middleware('org.permission:create_folders');
+
+        Route::post('/storage/upload', [StorageController::class, 'upload'])
+            ->middleware('org.permission:upload_documents');
+
+        // Single Document Operations
+        Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
+            ->middleware('org.permission:view_storage');
+
+        Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
+            ->middleware('org.permission:upload_documents');
+
+        Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
+            ->middleware('org.permission:delete_documents');
+
+        Route::post('/storage/documents/{document}/move', [StorageController::class, 'move'])
+            ->middleware('org.permission:upload_documents');
+
+        Route::post('/storage/documents/{document}/copy', [StorageController::class, 'copy'])
+            ->middleware('org.permission:upload_documents');
+
+        Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
+            ->middleware('org.permission:upload_documents');
+
+        Route::get(
+            '/storage/documents/{document}/versions/{version}/download',
+            [DocumentController::class, 'downloadVersion']
+        )
+            ->middleware('org.permission:view_storage');
     });
 
     /** =============================================================== */

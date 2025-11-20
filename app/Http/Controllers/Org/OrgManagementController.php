@@ -69,10 +69,12 @@ class OrgManagementController extends Controller
 
     /**
      * Get organization overview for editing
+     * Changed: Now accessible to all members, not just those with manage permission
      */
     public function overview(Organization $organization)
     {
-        $this->authorize('manage', $organization);
+        // Change from 'manage' to 'viewMembers' - any member can view basic org info
+        $this->authorize('viewMembers', $organization);
 
         // Build location object
         $location = null;
@@ -452,6 +454,38 @@ class OrgManagementController extends Controller
                 'joined_at' => $member->pivot->created_at,
             ];
         }));
+    }
+
+
+    /**
+     * Get basic information for a single member (for read-only profile view)
+     */
+    public function showMember(Organization $organization, User $user)
+    {
+        // Ensures the authenticated user is a member of the organization
+        $this->authorize('viewMembers', $organization);
+
+        // Ensures the target user is a member of the organization
+        if (!$organization->hasMember($user->id)) {
+            return response()->json(['message' => 'User is not a member of this organization'], 404);
+        }
+
+        // Retrieve the pivot data (role, joined_at)
+        $memberPivot = $organization->members()
+            ->where('users.id', $user->id)
+            ->select('organization_user.role', 'organization_user.created_at')
+            ->first();
+
+        return response()->json([
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'avatar' => $user->avatar,
+            'role' => $memberPivot->role,
+            'joined_at' => $memberPivot->created_at,
+            'active' => true, // Assuming active unless you implement an active status column
+            'joinMethod' => 'invited', // Placeholder/default for basic profile
+        ]);
     }
 
     /**
