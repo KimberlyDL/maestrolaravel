@@ -7,20 +7,14 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Tymon\JWTAuth\Contracts\JWTSubject;
-use Illuminate\Support\Facades\DB;
-use App\Models\Permission;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Traits\HasOrganizationPermissions;
 
 class User extends Authenticatable implements MustVerifyEmail, JWTSubject
 {
-    /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory, Notifiable, HasOrganizationPermissions;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
     protected $fillable = [
         'name',
         'email',
@@ -33,28 +27,17 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         'avatar_path',
         'avatar_url',
         'role',
-        // OAuth fields (for Google/social login)
-        'provider',       // 'google', 'github', etc.
-        'provider_id',    // OAuth provider's user ID
-        'avatar',         // OAuth avatar URL (can merge with avatar_url if needed)
-        'email_verified_at', // Add this to fillable for OAuth auto-verification
+        'provider',
+        'provider_id',
+        'avatar',
+        'email_verified_at',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -63,17 +46,12 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         ];
     }
 
-    /**
-     * Get the identifier that will be stored in the JWT subject claim.
-     */
+    // JWT methods
     public function getJWTIdentifier()
     {
         return $this->getKey();
     }
 
-    /**
-     * Return a key value array, containing any custom claims to be added to JWT.
-     */
     public function getJWTCustomClaims(): array
     {
         return [
@@ -82,94 +60,210 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         ];
     }
 
-    /**
-     * Check if user signed up via OAuth provider
-     */
+    // OAuth check
     public function isOAuthUser(): bool
     {
         return !empty($this->provider);
     }
 
-    /**
-     * Get the user's avatar URL (prefer OAuth avatar, fallback to local)
-     */
+    // Avatar URL
     public function getAvatarAttribute($value)
     {
-        // If OAuth avatar exists, use it
-        if ($value) {
-            return $value;
-        }
-
-        // Otherwise use local avatar
-        if ($this->avatar_url) {
-            return $this->avatar_url;
-        }
-
-        if ($this->avatar_path) {
-            return asset('storage/' . $this->avatar_path);
-        }
-
-        // Default avatar
+        if ($value) return $value;
+        if ($this->avatar_url) return $this->avatar_url;
+        if ($this->avatar_path) return asset('storage/' . $this->avatar_path);
         return 'https://ui-avatars.com/api/?name=' . urlencode($this->name) . '&background=random';
     }
 
-    /** Multi-org membership */
-    public function organizations()
+    // ========================================
+    // Organization Relationships
+    // ========================================
+
+    /**
+     * Organizations this user belongs to (with role)
+     */
+    public function organizations(): BelongsToMany
     {
         return $this->belongsToMany(Organization::class, 'organization_user')
             ->withPivot('role')
             ->withTimestamps();
     }
 
-    /** Optional: pivot records directly */
-    public function orgMemberships()
+    /**
+     * Direct access to pivot records
+     */
+    public function orgMemberships(): HasMany
     {
         return $this->hasMany(OrganizationUser::class);
     }
 
-    /** Documents created by this user (owner/author) */
-    public function createdDocuments()
+    // ========================================
+    // Permission Relationships (NEW - Eloquent)
+    // ========================================
+
+    /**
+     * Get permissions for a specific organization
+     * Returns Permission models with pivot data
+     */
+    public function organizationPermissions(int $organizationId): BelongsToMany
     {
-        return $this->hasMany(Document::class, 'created_by');
+        return $this->belongsToMany(Permission::class, 'organization_user_permissions')
+            ->withPivot('organization_id', 'granted_by', 'granted_at')
+            ->wherePivot('organization_id', $organizationId)
+            ->withTimestamps();
     }
 
-    /** Versions uploaded by this user */
-    public function uploadedVersions()
+    /**
+     * Get all permissions across all organizations
+     */
+    public function allOrganizationPermissions(): BelongsToMany
     {
-        return $this->hasMany(DocumentVersion::class, 'uploaded_by');
+        return $this->belongsToMany(Permission::class, 'organization_user_permissions')
+            ->withPivot('organization_id', 'granted_by', 'granted_at')
+            ->withTimestamps();
     }
 
-    /** Review requests submitted by this user */
-    public function submittedReviewRequests()
+    // ========================================
+    // Permission Check Methods (Eloquent-based)
+    // ========================================
+
+    /**
+     * Get permissions for organization (returns array of names)
+     */
+    public function permissionsForOrganization(int $organizationId): array
     {
-        return $this->hasMany(ReviewRequest::class, 'submitted_by');
+        return $this->organizationPermissions($organizationId)
+            ->pluck('permissions.name')
+            ->toArray();
     }
 
-    /** Reviewer assignments (per-reviewer state) */
-    public function reviewAssignments()
+    /**
+     * Check if user has specific permission in organization
+     */
+    public function hasPermission(int $organizationId, string $permission): bool
     {
-        return $this->hasMany(ReviewRecipient::class, 'reviewer_user_id');
+        // Admins have all permissions
+        $role = $this->roleInOrg($organizationId);
+        if (in_array($role, ['admin', 'owner'])) {
+            return true;
+        }
+
+        // Check explicit permission using Eloquent
+        return $this->organizationPermissions($organizationId)
+            ->where('permissions.name', $permission)
+            ->exists();
     }
 
-    /** Comments authored by this user */
-    public function reviewComments()
+    /**
+     * Check if user has ANY of the given permissions
+     */
+    public function hasAnyPermission(int $organizationId, array $permissions): bool
     {
-        return $this->hasMany(ReviewComment::class, 'author_user_id');
+        $role = $this->roleInOrg($organizationId);
+        if (in_array($role, ['admin', 'owner'])) {
+            return true;
+        }
+
+        return $this->organizationPermissions($organizationId)
+            ->whereIn('permissions.name', $permissions)
+            ->exists();
     }
 
-    /** Actions (audit log) performed by this user */
-    public function reviewActions()
+    /**
+     * Check if user has ALL of the given permissions
+     */
+    public function hasAllPermissions(int $organizationId, array $permissions): bool
     {
-        return $this->hasMany(ReviewAction::class, 'actor_user_id');
+        $role = $this->roleInOrg($organizationId);
+        if (in_array($role, ['admin', 'owner'])) {
+            return true;
+        }
+
+        $count = $this->organizationPermissions($organizationId)
+            ->whereIn('permissions.name', $permissions)
+            ->count();
+
+        return $count === count($permissions);
     }
 
-    /** Attachments uploaded by this user */
-    public function reviewAttachments()
+    /**
+     * Grant permission to user in organization
+     */
+    public function grantPermission(int $organizationId, string $permissionName, ?int $grantedBy = null): bool
     {
-        return $this->hasMany(ReviewAttachment::class, 'uploaded_by');
+        $permission = Permission::where('name', $permissionName)->first();
+
+        if (!$permission) {
+            return false;
+        }
+
+        // Use sync to avoid duplicates
+        $this->organizationPermissions($organizationId)->syncWithoutDetaching([
+            $permission->id => [
+                'granted_by' => $grantedBy ?? auth()->id(),
+                'granted_at' => now(),
+            ]
+        ]);
+
+        return true;
     }
 
-    /** ---- Convenience helpers (optional) ---- */
+    /**
+     * Revoke permission from user in organization
+     */
+    public function revokePermission(int $organizationId, string $permissionName): bool
+    {
+        $permission = Permission::where('name', $permissionName)->first();
+
+        if (!$permission) {
+            return false;
+        }
+
+        // Need to manually delete because we can't detach with wherePivot
+        \DB::table('organization_user_permissions')
+            ->where('organization_id', $organizationId)
+            ->where('user_id', $this->id)
+            ->where('permission_id', $permission->id)
+            ->delete();
+
+        return true;
+    }
+
+    /**
+     * Sync permissions for user in organization (replaces all)
+     */
+    public function syncPermissions(int $organizationId, array $permissionNames, ?int $grantedBy = null): void
+    {
+        $permissions = Permission::whereIn('name', $permissionNames)->get();
+
+        // First, remove all permissions for this org
+        \DB::table('organization_user_permissions')
+            ->where('organization_id', $organizationId)
+            ->where('user_id', $this->id)
+            ->delete();
+
+        // Then add new permissions
+        $inserts = $permissions->map(function ($permission) use ($organizationId, $grantedBy) {
+            return [
+                'organization_id' => $organizationId,
+                'user_id' => $this->id,
+                'permission_id' => $permission->id,
+                'granted_by' => $grantedBy ?? auth()->id(),
+                'granted_at' => now(),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        })->toArray();
+
+        if (!empty($inserts)) {
+            \DB::table('organization_user_permissions')->insert($inserts);
+        }
+    }
+
+    // ========================================
+    // Organization Helper Methods (Your Existing)
+    // ========================================
+
     public function roleInOrg($organizationId): ?string
     {
         $m = $this->orgMemberships()->where('organization_id', $organizationId)->first();
@@ -188,131 +282,42 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         return $pivot && in_array($pivot->role, $roles, true);
     }
 
+    // ========================================
+    // Document/Review Relationships (Your Existing)
+    // ========================================
 
-
-
-
-
-
-    /**
-     * Get user's permissions for a specific organization
-     */
-    public function permissionsForOrganization(int $organizationId): array
+    public function createdDocuments()
     {
-        return DB::table('organization_user_permissions')
-            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
-            ->where('organization_user_permissions.organization_id', $organizationId)
-            ->where('organization_user_permissions.user_id', $this->id)
-            ->pluck('permissions.name')
-            ->toArray();
+        return $this->hasMany(Document::class, 'created_by');
     }
 
-    /**
-     * Check if user has a specific permission in an organization
-     */
-    public function hasPermission(int $organizationId, string $permission): bool
+    public function uploadedVersions()
     {
-        // Admins have all permissions
-        $role = $this->roleInOrg($organizationId);
-        if (in_array($role, ['admin', 'owner'])) {
-            return true;
-        }
-
-        return DB::table('organization_user_permissions')
-            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
-            ->where('organization_user_permissions.organization_id', $organizationId)
-            ->where('organization_user_permissions.user_id', $this->id)
-            ->where('permissions.name', $permission)
-            ->exists();
+        return $this->hasMany(DocumentVersion::class, 'uploaded_by');
     }
 
-    /**
-     * Check if user has ANY of the given permissions
-     */
-    public function hasAnyPermission(int $organizationId, array $permissions): bool
+    public function submittedReviewRequests()
     {
-        $role = $this->roleInOrg($organizationId);
-        if (in_array($role, ['admin', 'owner'])) {
-            return true;
-        }
-
-        return DB::table('organization_user_permissions')
-            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
-            ->where('organization_user_permissions.organization_id', $organizationId)
-            ->where('organization_user_permissions.user_id', $this->id)
-            ->whereIn('permissions.name', $permissions)
-            ->exists();
+        return $this->hasMany(ReviewRequest::class, 'submitted_by');
     }
 
-    /**
-     * Check if user has ALL of the given permissions
-     */
-    public function hasAllPermissions(int $organizationId, array $permissions): bool
+    public function reviewAssignments()
     {
-        $role = $this->roleInOrg($organizationId);
-        if (in_array($role, ['admin', 'owner'])) {
-            return true;
-        }
-
-        $count = DB::table('organization_user_permissions')
-            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
-            ->where('organization_user_permissions.organization_id', $organizationId)
-            ->where('organization_user_permissions.user_id', $this->id)
-            ->whereIn('permissions.name', $permissions)
-            ->count();
-
-        return $count === count($permissions);
+        return $this->hasMany(ReviewRecipient::class, 'reviewer_user_id');
     }
 
-    /**
-     * Grant permission to user in organization
-     */
-    public function grantPermission(int $organizationId, string $permissionName): void
+    public function reviewComments()
     {
-        $permission = Permission::where('name', $permissionName)->firstOrFail();
-
-        DB::table('organization_user_permissions')->insertOrIgnore([
-            'organization_id' => $organizationId,
-            'user_id' => $this->id,
-            'permission_id' => $permission->id,
-            'granted_by' => auth()->id(),
-            'granted_at' => now(),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        return $this->hasMany(ReviewComment::class, 'author_user_id');
     }
 
-    /**
-     * Revoke permission from user in organization
-     */
-    public function revokePermission(int $organizationId, string $permissionName): void
+    public function reviewActions()
     {
-        $permission = Permission::where('name', $permissionName)->first();
-        if (!$permission) return;
-
-        DB::table('organization_user_permissions')
-            ->where('organization_id', $organizationId)
-            ->where('user_id', $this->id)
-            ->where('permission_id', $permission->id)
-            ->delete();
+        return $this->hasMany(ReviewAction::class, 'actor_user_id');
     }
 
-    /**
-     * Sync permissions for user in organization (replaces all)
-     */
-    public function syncPermissions(int $organizationId, array $permissionNames): void
+    public function reviewAttachments()
     {
-        DB::transaction(function () use ($organizationId, $permissionNames) {
-            // Remove existing permissions
-            DB::table('organization_user_permissions')
-                ->where('organization_id', $organizationId)
-                ->where('user_id', $this->id)
-                ->delete();
-
-            // Add new permissions
-            foreach ($permissionNames as $permissionName) {
-                $this->grantPermission($organizationId, $permissionName);
-            }
-        });
+        return $this->hasMany(ReviewAttachment::class, 'uploaded_by');
     }
 }

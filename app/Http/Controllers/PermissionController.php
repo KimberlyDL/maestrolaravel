@@ -9,6 +9,7 @@ use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use App\Events\PermissionsUpdated;
 
 class PermissionController extends Controller
 {
@@ -133,25 +134,38 @@ class PermissionController extends Controller
 
         $permission = Permission::where('name', $data['permission_name'])->first();
 
-        $exists = DB::table('organization_user_permissions')
-            ->where('organization_id', $organization->id)
-            ->where('user_id', $user->id)
-            ->where('permission_id', $permission->id)
-            ->exists();
+        // $exists = DB::table('organization_user_permissions')
+        //     ->where('organization_id', $organization->id)
+        //     ->where('user_id', $user->id)
+        //     ->where('permission_id', $permission->id)
+        //     ->exists();
 
-        if ($exists) {
-            return response()->json(['message' => 'User already has this permission'], 422);
-        }
+        // if ($exists) {
+        //     return response()->json(['message' => 'User already has this permission'], 422);
+        // }
 
-        DB::table('organization_user_permissions')->insert([
-            'organization_id' => $organization->id,
-            'user_id' => $user->id,
-            'permission_id' => $permission->id,
-            'granted_by' => Auth::id(),
-            'granted_at' => now(),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        DB::table('organization_user_permissions')->updateOrInsert(
+            [
+                'organization_id' => $organization->id,
+                'user_id' => $user->id,
+                'permission_id' => $permission->id,
+            ],
+            [
+                'granted_by' => auth()->id(),
+                'granted_at' => now(),
+                'updated_at' => now(),
+            ]
+        );
+
+        // DB::table('organization_user_permissions')->insert([
+        //     'organization_id' => $organization->id,
+        //     'user_id' => $user->id,
+        //     'permission_id' => $permission->id,
+        //     'granted_by' => Auth::id(),
+        //     'granted_at' => now(),
+        //     'created_at' => now(),
+        //     'updated_at' => now(),
+        // ]);
 
         ActivityLogger::log(
             $organization->id,
@@ -162,9 +176,15 @@ class PermissionController extends Controller
             description: "Permission '{$permission->display_name}' granted to {$user->name}"
         );
 
+        // return response()->json([
+        //     'message' => 'Permission granted successfully',
+        //     'permission' => $permission->display_name
+        // ]);
+
         return response()->json([
             'message' => 'Permission granted successfully',
-            'permission' => $permission->display_name
+            'invalidate_cache' => true, // Signal to frontend
+            'affected_user_id' => $user->id, // Who needs to refresh
         ]);
     }
 
