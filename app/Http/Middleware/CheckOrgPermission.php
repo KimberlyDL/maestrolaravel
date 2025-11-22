@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\DB;
+use App\Models\Organization;
 
 class CheckOrgPermission
 {
@@ -47,39 +48,37 @@ class CheckOrgPermission
             return response()->json(['message' => 'Organization not found in route'], 400);
         }
 
-        $organizationId = is_object($organization) ? $organization->id : $organization;
+        // Ensure we have Organization model instance
+        if (!$organization instanceof Organization) {
+            $organization = Organization::find($organization);
 
-        // Check if user is a member
-        $membership = DB::table('organization_user')
-            ->where('organization_id', $organizationId)
-            ->where('user_id', $user->id)
-            ->first();
+            if (!$organization) {
+                return response()->json(['message' => 'Organization not found'], 404);
+            }
+        }
 
-        if (!$membership) {
+        // Check if user is a member using Eloquent
+        if (!$organization->hasMember($user->id)) {
             return response()->json([
                 'message' => 'You are not a member of this organization'
             ], 403);
         }
 
-        $userRole = $membership->role;
+        // Get user's role using Eloquent
+        $userRole = $organization->getUserRole($user->id);
 
-        // RULE 1: Admins have ALL permissions automatically
+        // RULE 1: Admins have ALL permissions
         if (in_array($userRole, ['admin', 'owner'])) {
             return $next($request);
         }
 
-        // RULE 2: Check for implicit member permissions (no database lookup needed)
+        // RULE 2: Check implicit member permissions
         if (in_array($permission, self::IMPLICIT_MEMBER_PERMISSIONS)) {
             return $next($request);
         }
 
-        // RULE 3: Check explicit permissions in database
-        $hasPermission = DB::table('organization_user_permissions')
-            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
-            ->where('organization_user_permissions.organization_id', $organizationId)
-            ->where('organization_user_permissions.user_id', $user->id)
-            ->where('permissions.name', $permission)
-            ->exists();
+        // RULE 3: Check explicit permissions using Eloquent
+        $hasPermission = $user->hasPermission($organization->id, $permission);
 
         if (!$hasPermission) {
             return response()->json([
@@ -90,44 +89,5 @@ class CheckOrgPermission
         }
 
         return $next($request);
-    }
-
-    /**
-     * Check if a user has a specific permission (static helper method)
-     * 
-     * @param int $organizationId
-     * @param int $userId
-     * @param string $permission
-     * @return bool
-     */
-    public static function userHasPermission(int $organizationId, int $userId, string $permission): bool
-    {
-        // Get user role
-        $userRole = DB::table('organization_user')
-            ->where('organization_id', $organizationId)
-            ->where('user_id', $userId)
-            ->value('role');
-
-        if (!$userRole) {
-            return false;
-        }
-
-        // Admins have all permissions
-        if (in_array($userRole, ['admin', 'owner'])) {
-            return true;
-        }
-
-        // Check implicit member permissions
-        if (in_array($permission, self::IMPLICIT_MEMBER_PERMISSIONS)) {
-            return true;
-        }
-
-        // Check database
-        return DB::table('organization_user_permissions')
-            ->join('permissions', 'organization_user_permissions.permission_id', '=', 'permissions.id')
-            ->where('organization_user_permissions.organization_id', $organizationId)
-            ->where('organization_user_permissions.user_id', $userId)
-            ->where('permissions.name', $permission)
-            ->exists();
     }
 }
