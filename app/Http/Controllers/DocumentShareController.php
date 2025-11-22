@@ -17,6 +17,223 @@ class DocumentShareController extends Controller
     private const MAX_FAILED_ATTEMPTS = 5;
     private const FAILED_ATTEMPT_WINDOW_MINUTES = 15;
 
+
+
+    /**
+     * Get temporary download URL for public access
+     * GET /api/share/{token}/download-url
+     */
+    public function getPublicDownloadUrl($token, Request $request)
+    {
+        // Rate limiting
+        $this->checkRateLimit($token, $request);
+
+        $share = DocumentShare::with('document.latestVersion')
+            ->where('share_token', $token)
+            ->first();
+
+        if (!$share || !$share->isValid()) {
+            $this->logAccessAttempt($token, false, 'download_invalid_token', $request);
+            return response()->json(['message' => 'Invalid or expired share link'], 404);
+        }
+
+        // Security checks
+        if (!$this->isIpAllowed($share, $request)) {
+            $this->logAccessAttempt($token, false, 'download_ip_denied', $request);
+            return response()->json(['message' => 'Access denied'], 403);
+        }
+
+        if ($share->password) {
+            $password = $request->query('password');
+            if (!$password || !password_verify($password, $share->password)) {
+                $this->logAccessAttempt($token, false, 'download_invalid_password', $request);
+                return response()->json(['message' => 'Invalid password'], 403);
+            }
+        }
+
+        if ($share->max_downloads && $share->download_count >= $share->max_downloads) {
+            $this->logAccessAttempt($token, false, 'download_limit_exceeded', $request);
+            return response()->json(['message' => 'Download limit reached'], 403);
+        }
+
+        $document = $share->document;
+        $version = $document->latestVersion;
+
+        if (!$version) {
+            return response()->json(['message' => 'No file version found'], 404);
+        }
+
+        $diskName = config('filesystems.default', 'local');
+        $disk = Storage::disk($diskName);
+        $filePath = $version->file_path;
+
+        if (!$disk->exists($filePath)) {
+            $this->logAccessAttempt($token, false, 'file_not_found', $request);
+            return response()->json(['message' => 'File not found'], 404);
+        }
+
+        // Build filename
+        $extension = pathinfo($filePath, PATHINFO_EXTENSION);
+        $safeTitle = preg_replace('/[^A-Za-z0-9_\-]/', '_', $document->title);
+        $downloadName = "{$safeTitle}_v{$version->version_number}.{$extension}";
+
+        // Increment download count
+        $share->increment('download_count');
+
+        // Generate temporary URL
+        try {
+            $url = $disk->temporaryUrl(
+                $filePath,
+                now()->addMinutes(10),
+                [
+                    'ResponseContentDisposition' => 'attachment; filename="' . $downloadName . '"',
+                    'ResponseContentType' => $document->mime_type ?: $this->getMimeTypeFromExtension($extension),
+                ]
+            );
+
+            $this->logAccessAttempt($token, true, 'download_url_generated', $request, $document->id);
+
+            return response()->json([
+                'url' => $url,
+                'filename' => $downloadName,
+                'expires_in' => 600,
+                'file_size' => $document->file_size,
+                'mime_type' => $document->mime_type,
+            ]);
+        } catch (\Exception $e) {
+            // Fallback for local storage
+            if ($diskName === 'local') {
+                $publicToken = $this->generatePublicDownloadToken($token, $document->id);
+
+                return response()->json([
+                    'url' => route('documents.public-secure-download', [
+                        'token' => $token,
+                        'downloadToken' => $publicToken,
+                    ]),
+                    'filename' => $downloadName,
+                    'expires_in' => 600,
+                    'file_size' => $document->file_size,
+                    'mime_type' => $document->mime_type,
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Could not generate download URL',
+            ], 500);
+        }
+    }
+
+    /**
+     * Secure public download endpoint (fallback for local storage)
+     * GET /api/share/{token}/secure/{downloadToken}
+     */
+    public function securePublicDownload($token, $downloadToken, Request $request)
+    {
+        // Verify download token
+        if (!$this->verifyPublicDownloadToken($downloadToken, $token)) {
+            return response()->json(['message' => 'Invalid or expired download token'], 403);
+        }
+
+        // Rate limiting
+        $this->checkRateLimit($token, $request);
+
+        $share = DocumentShare::with('document.latestVersion')
+            ->where('share_token', $token)
+            ->first();
+
+        if (!$share || !$share->isValid()) {
+            return response()->json(['message' => 'Invalid share link'], 404);
+        }
+
+        // Security checks (simplified since token was already verified)
+        if (!$this->isIpAllowed($share, $request)) {
+            return response()->json(['message' => 'Access denied'], 403);
+        }
+
+        $document = $share->document;
+        $version = $document->latestVersion;
+
+        if (!$version) {
+            return response()->json(['message' => 'No file version found'], 404);
+        }
+
+        $disk = Storage::disk('local');
+        $filePath = $version->file_path;
+
+        if (!$disk->exists($filePath)) {
+            return response()->json(['message' => 'File not found'], 404);
+        }
+
+        // Build filename
+        $extension = pathinfo($filePath, PATHINFO_EXTENSION);
+        $safeTitle = preg_replace('/[^A-Za-z0-9_\-]/', '_', $document->title);
+        $downloadName = "{$safeTitle}_v{$version->version_number}.{$extension}";
+
+        // Increment download count
+        $share->increment('download_count');
+
+        $this->logAccessAttempt($token, true, 'document_downloaded', $request, $document->id);
+
+        return $disk->download($filePath, $downloadName, [
+            'Content-Type' => $document->mime_type ?: $this->getMimeTypeFromExtension($extension),
+            'Content-Disposition' => 'attachment; filename="' . $downloadName . '"',
+        ]);
+    }
+
+    /**
+     * Generate secure token for public downloads
+     */
+    private function generatePublicDownloadToken(string $shareToken, int $docId): string
+    {
+        $data = [
+            'share' => $shareToken,
+            'doc' => $docId,
+            'exp' => now()->addMinutes(10)->timestamp,
+        ];
+
+        $payload = base64_encode(json_encode($data));
+        $signature = hash_hmac('sha256', $payload, config('app.key'));
+
+        return $payload . '.' . $signature;
+    }
+
+    /**
+     * Verify public download token
+     */
+    private function verifyPublicDownloadToken(string $token, string $shareToken): bool
+    {
+        $parts = explode('.', $token);
+        if (count($parts) !== 2) {
+            return false;
+        }
+
+        [$payload, $signature] = $parts;
+
+        // Verify signature
+        $expectedSignature = hash_hmac('sha256', $payload, config('app.key'));
+        if (!hash_equals($expectedSignature, $signature)) {
+            return false;
+        }
+
+        // Decode payload
+        $data = json_decode(base64_decode($payload), true);
+        if (!$data) {
+            return false;
+        }
+
+        // Check expiry
+        if ($data['exp'] < now()->timestamp) {
+            return false;
+        }
+
+        // Check share token matches
+        if ($data['share'] !== $shareToken) {
+            return false;
+        }
+
+        return true;
+    }
+
     /**
      * Get or create share configuration for a document
      */

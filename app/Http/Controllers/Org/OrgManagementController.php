@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class OrgManagementController extends Controller
 {
@@ -301,6 +302,7 @@ class OrgManagementController extends Controller
         return response()->json($requests);
     }
 
+
     /**
      * Approve join request - AUTO-GRANTS DEFAULT PERMISSIONS
      */
@@ -334,23 +336,47 @@ class OrgManagementController extends Controller
 
         $role = $data['role'] ?? 'member';
 
-        DB::transaction(function () use ($organization, $joinRequest, $data, $role) {
-            // Add user to organization
-            DB::table('organization_user')->insert([
-                'organization_id' => $organization->id,
-                'user_id' => $joinRequest->user_id,
+        // Fetch the User model before the transaction to pass it to the closure
+        $user = User::find($joinRequest->user_id);
+
+        // 💡 LOG POINT 1: Initial check of data before transaction
+        Log::info("[OrgApproval] Approval started for Request #{$requestId}. User ID: {$user->id}, Org ID: {$organization->id}, Role: {$role}.");
+
+        DB::transaction(function () use ($organization, $joinRequest, $data, $role, $requestId, $user) {
+
+            // 🚀 FIX: Use the Eloquent relationship attach() method
+            // This properly updates the pivot table and synchronizes the $organization model.
+            $organization->users()->attach($user->id, [
                 'role' => $role,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
 
+            // 💡 LOG POINT 2: After user added via Eloquent relationship
+            Log::info("[OrgApproval] User ID: {$user->id} successfully attached to organization_user pivot table via Eloquent.");
+
             // ✅ AUTO-GRANT DEFAULT PERMISSIONS
-            $user = User::find($joinRequest->user_id);
+            // Eloquent's attach() ensures the $user model's relationships are accurate
+            // so DefaultPermissions::grantDefaultPermissions now runs correctly.
+
+            // 💡 LOG POINT 3: Before calling the permission service
+            Log::info("[OrgApproval] Calling DefaultPermissions::grantDefaultPermissions for User ID: {$user->id}...");
+
             \App\Services\DefaultPermissions::grantDefaultPermissions($organization, $user, $role);
 
-            // Update join request status
+            // 💡 LOG POINT 4: After permission grant call
+            Log::info("[OrgApproval] DefaultPermissions::grantDefaultPermissions executed.");
+
+            // FIX: Delete old approved/declined requests first to avoid unique constraint
             DB::table('organization_join_requests')
-                ->where('id', $joinRequest->id)
+                ->where('organization_id', $organization->id)
+                ->where('user_id', $joinRequest->user_id)
+                ->whereIn('status', ['approved', 'declined'])
+                ->delete();
+
+            // Update current join request status
+            DB::table('organization_join_requests')
+                ->where('id', $requestId)
                 ->update([
                     'status' => 'approved',
                     'admin_note' => $data['admin_note'] ?? 'Your request has been approved.',
@@ -358,9 +384,15 @@ class OrgManagementController extends Controller
                     'reviewed_at' => now(),
                     'updated_at' => now(),
                 ]);
+
+            // 💡 LOG POINT 5: Transaction logic successful
+            Log::info("[OrgApproval] Join request status updated to 'approved'. Transaction preparing to commit.");
         });
 
-        $user = User::find($joinRequest->user_id);
+        // 💡 LOG POINT 6: After transaction commit, confirming ActivityLogger data
+        Log::info("[OrgApproval] ActivityLogger called for user: {$user->name} ({$user->id}) as {$role}.");
+
+        // The $user variable is still valid from before the transaction
         ActivityLogger::log(
             $organization->id,
             'member_added',
@@ -375,7 +407,6 @@ class OrgManagementController extends Controller
             'user_name' => $user->name,
         ]);
     }
-
     /**
      * Decline join request
      */

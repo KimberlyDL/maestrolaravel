@@ -156,6 +156,12 @@ Route::middleware(['auth:api'])->group(function () {
 
 
 
+
+
+
+
+
+
     /** Document Versions */
     Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
         ->middleware('org.permission:upload_documents');
@@ -164,17 +170,48 @@ Route::middleware(['auth:api'])->group(function () {
     //     ->middleware('org.permission:view_storage');
 
 
-    // Download specific document version (authenticated users only)
+    /** Download specific document version (authenticated) */
     Route::get(
         '/storage/documents/{document}/versions/{version}/download',
         [DocumentController::class, 'downloadVersion']
-    )
-        ->middleware('org.permission:view_storage');
+    )->middleware('org.permission:view_storage');
 
     Route::get(
         '/documents/{document}/versions/{version}/download',
         [DocumentController::class, 'downloadVersion']
     );
+
+
+
+
+
+    /** =============================================================== */
+    /** ---------------- Document Download (New Method) --------------- */
+    /** =============================================================== */
+
+    // Get temporary signed URL for download
+    Route::get(
+        '/documents/{document}/versions/{version}/download-url',
+        [DocumentController::class, 'getDownloadUrl']
+    );
+
+    // Secure download endpoint for local storage (fallback)
+    Route::get(
+        '/documents/{document}/versions/{version}/secure/{token}',
+        [DocumentController::class, 'secureDownload']
+    )->name('documents.secure-download');
+
+    // Storage context routes (organization-scoped)
+    Route::get(
+        '/org/{organization}/storage/documents/{document}/versions/{version}/download-url',
+        [DocumentController::class, 'getDownloadUrl']
+    )->middleware('org.permission:view_storage');
+
+    Route::get(
+        '/org/{organization}/storage/documents/{document}/versions/{version}/secure/{token}',
+        [DocumentController::class, 'secureDownload']
+    )->middleware('org.permission:view_storage');
+
 
 
 
@@ -186,9 +223,9 @@ Route::middleware(['auth:api'])->group(function () {
     // Get document details with all versions
     Route::get('/documents/{document}', [DocumentController::class, 'show']);
 
-    // Create new document
-    Route::post('/documents', [DocumentController::class, 'store'])
-        ->middleware('org.permission:create_reviews');
+    // // Create new document
+    // Route::post('/documents', [DocumentController::class, 'store'])
+    //     ->middleware('org.permission:create_reviews');
 
     // Add new version to existing document
     Route::post('/documents/{document}/versions', [DocumentController::class, 'addVersion'])
@@ -214,9 +251,9 @@ Route::middleware(['auth:api'])->group(function () {
     Route::get('/reviews', [ReviewRequestController::class, 'index'])
         ->middleware('org.permission:view_reviews');
 
-    // Create a thread
-    Route::post('/reviews', [ReviewRequestController::class, 'store'])
-        ->middleware('org.permission:create_reviews');
+    // // Create a thread
+    // Route::post('/reviews', [ReviewRequestController::class, 'store'])
+    //     ->middleware('org.permission:create_reviews');
 
     // Read a thread
     Route::get('/reviews/{review}', [ReviewRequestController::class, 'show'])
@@ -310,7 +347,8 @@ Route::middleware(['auth:api'])->group(function () {
 
     // View members (requires permission)
     Route::get('/organizations/{organization}/members', [OrganizationController::class, 'members'])
-        ->middleware('org.permission:view_members');
+        // ->middleware('org.permission:view_members')
+    ;
 
     // Add member (admin only)
     Route::post('/organizations/{organization}/members', [OrganizationController::class, 'addMember'])
@@ -337,6 +375,12 @@ Route::middleware(['auth:api'])->group(function () {
 
     Route::prefix('org/{organization}')->group(function () {
 
+
+
+        // Get all available permissions (add this route)
+        Route::get('/permissions', [PermissionController::class, 'index'])
+            ->middleware('org.member');
+
         // Get all members with their permissions (requires manage_permissions)
         Route::get('/permissions/members', [PermissionController::class, 'memberPermissions'])
             ->middleware('org.permission:manage_permissions');
@@ -354,6 +398,27 @@ Route::middleware(['auth:api'])->group(function () {
 
         Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions'])
             ->middleware('org.permission:manage_permissions');
+
+
+
+
+
+        /** =============================================================== */
+        /** ---------- DOC REVIEW FEATURE (Admin Dashboard) ---------- */
+        /** =============================================================== */
+
+        Route::post('/documents', [DocumentController::class, 'store']) // <-- ADD THIS LINE
+            ->middleware('org.permission:create_reviews');
+
+        // Create a thread
+        Route::post('/reviews', [ReviewRequestController::class, 'store'])
+            ->middleware('org.permission:create_reviews');
+
+
+
+
+
+
 
         // Dashboard (any member)
         Route::get('/dashboard', [OrgManagementController::class, 'dashboard'])
@@ -558,6 +623,10 @@ Route::middleware(['auth:api'])->group(function () {
 
 
 
+
+
+
+
         /** =============================================================== */
         /** ============= Document Storage (Google Drive-like) ============ */
         /** =============================================================== */
@@ -598,8 +667,7 @@ Route::middleware(['auth:api'])->group(function () {
         Route::get(
             '/storage/documents/{document}/versions/{version}/download',
             [DocumentController::class, 'downloadVersion']
-        )
-            ->middleware('org.permission:view_storage');
+        )->middleware('org.permission:view_storage');
     });
 
     /** =============================================================== */
@@ -638,57 +706,38 @@ Route::middleware(['auth:api'])->group(function () {
     Route::post('/me/password', [ProfileController::class, 'changePassword']);
 });
 
+
+
+
+
 /*
 |--------------------------------------------------------------------------
 | Public Routes (No Authentication Required)
 |--------------------------------------------------------------------------
 */
+
 Route::prefix('share')->group(function () {
 
-    /**
-     * GET /share/{token}
-     * Get shared document metadata (public access with security checks)
-     * 
-     * Security checks performed:
-     * - Token validity
-     * - Expiry date
-     * - IP whitelist (if configured)
-     * - Password (if configured)
-     * - Download limits
-     * 
-     * Query Parameters:
-     * - password: Required if share has password protection
-     * 
-     * Example: /api/share/abc123def456?password=myPassword
-     */
+    // Get shared document metadata
     Route::get('/{token}', [DocumentShareController::class, 'getPublicDocument'])
         ->name('documents.public-access');
 
-    /**
-     * GET /share/{token}/download
-     * Download shared document (public access with security checks)
-     * 
-     * Same security checks as getPublicDocument()
-     * Increments download counter if download limit is set
-     * Logs the download attempt
-     * 
-     * Returns file with correct MIME type and filename
-     * 
-     * Query Parameters:
-     * - password: Required if share has password protection
-     * 
-     * Example: /api/share/abc123def456/download?password=myPassword
-     */
+    // Get temporary download URL (NEW - RECOMMENDED)
+    Route::get('/{token}/download-url', [DocumentShareController::class, 'getPublicDownloadUrl'])
+        ->name('documents.public-download-url');
+
+    // Secure download endpoint for local storage (fallback)
+    Route::get('/{token}/secure/{downloadToken}', [DocumentShareController::class, 'securePublicDownload'])
+        ->name('documents.public-secure-download');
+
+    // Legacy direct download (keep for backward compatibility)
     Route::get('/{token}/download', [DocumentShareController::class, 'downloadPublicDocument'])
         ->name('documents.public-download');
 });
 
 
-// Legacy routes for backward compatibility
-Route::get('/storage/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
-Route::get('/storage/public/{token}/download', [DocumentShareController::class, 'downloadPublicDocument']);
-Route::get('/documents/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
-Route::get('/documents/public/{token}/download', [DocumentShareController::class, 'downloadPublicDocument']);
+// Route::get('/documents/public/{token}', [DocumentShareController::class, 'getPublicDocument']);
+// Route::get('/documents/public/{token}/download', [DocumentShareController::class, 'downloadPublicDocument']);
 
 // Auth endpoints
 Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:6,1');
