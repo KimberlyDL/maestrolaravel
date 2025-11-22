@@ -29,14 +29,11 @@ class DefaultPermissions
     private static function getMemberPermissions(): array
     {
         return [
-            // Only view_announcements is granted by default
-            // This allows members to see the Overview tab only
-            'view_storage',
-            'view_members',
-            'view_announcements',
+            'view_members',         // Can see member list
+            'view_announcements',   // Can see announcements
+            'view_storage',         // Can browse storage (but not upload/delete)
         ];
     }
-
     /**
      * Viewer role - read-only access (same as member by default)
      */

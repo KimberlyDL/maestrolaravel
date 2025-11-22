@@ -34,37 +34,10 @@ use App\Http\Controllers\StorageController;
 Route::middleware(['auth:api'])->group(function () {
 
     /** =============================================================== */
-    /** ==================== Permission Management ==================== */
-    /** =============================================================== */
-
-    // Permission routes - OUTSIDE org prefix to match /organizations/ path
-    Route::prefix('organizations/{organization}')->group(function () {
-        // Get all available permissions (any authenticated user)
-        Route::get('/permissions', [PermissionController::class, 'index']);
-
-        // Get all members with their permissions (requires manage_permissions)
-        Route::get('/permissions/members', [PermissionController::class, 'memberPermissions'])
-            ->middleware('org.permission:manage_permissions');
-
-        // Get specific user's permissions (any member can check - for UI)
-        Route::get('/permissions/users/{user}', [PermissionController::class, 'userPermissions'])
-            ->middleware('org.member');
-
-        // Grant/revoke (requires manage_permissions)
-        Route::post('/permissions/users/{user}/grant', [PermissionController::class, 'grantPermission'])
-            ->middleware('org.permission:manage_permissions');
-
-        Route::post('/permissions/users/{user}/revoke', [PermissionController::class, 'revokePermission'])
-            ->middleware('org.permission:manage_permissions');
-
-        Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions'])
-            ->middleware('org.permission:manage_permissions');
-    });
-
-
-    /** =============================================================== */
     /** ============= Document Storage (Google Drive-like) ============ */
     /** =============================================================== */
+
+    #region Storage
 
     // List documents/folders in organization storage
     Route::get('/storage', [StorageController::class, 'index'])
@@ -213,12 +186,14 @@ Route::middleware(['auth:api'])->group(function () {
     )->middleware('org.permission:view_storage');
 
 
-
+    #endregion
 
 
     /** =============================================================== */
     /** ---------------- Legacy/Review Document Routes ---------------- */
     /** =============================================================== */
+
+    #region Review
 
     // Get document details with all versions
     Route::get('/documents/{document}', [DocumentController::class, 'show']);
@@ -326,10 +301,12 @@ Route::middleware(['auth:api'])->group(function () {
     Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
         ->middleware('org.permission:view_activity_logs');
 
+    #endregion
     /** =============================================================== */
     /** ======================== Organizations ======================== */
     /** =============================================================== */
 
+    #region Org Management
     // List organizations (my orgs or others)
     Route::get('/organizations', [OrganizationController::class, 'index']);
 
@@ -369,12 +346,17 @@ Route::middleware(['auth:api'])->group(function () {
     Route::delete('/organizations/{organization}/remove-invite', [OrganizationController::class, 'removeInviteCode'])
         ->middleware('org.permission:manage_invite_codes');
 
+    #endregion
     /** =============================================================== */
     /** ---------- Organization Management (Admin Dashboard) ---------- */
     /** =============================================================== */
 
     Route::prefix('org/{organization}')->group(function () {
 
+        /** =============================================================== */
+        /** ==================== Permission Management ==================== */
+        /** =============================================================== */
+        #region Permissions
 
 
         // Get all available permissions (add this route)
@@ -398,9 +380,7 @@ Route::middleware(['auth:api'])->group(function () {
 
         Route::post('/permissions/users/{user}/bulk', [PermissionController::class, 'bulkGrantPermissions'])
             ->middleware('org.permission:manage_permissions');
-
-
-
+        #endregion
 
 
         /** =============================================================== */
@@ -424,60 +404,16 @@ Route::middleware(['auth:api'])->group(function () {
         Route::get('/dashboard', [OrgManagementController::class, 'dashboard'])
             ->middleware('org.member');
 
-        // Overview (requires permission to view)
+        // ===== OVERVIEW - All members can access =====
         Route::get('/overview', [OrgManagementController::class, 'overview'])
-            // ->middleware('org.permission:view_org_settings');
-            ->middleware('org.member');
+            ->middleware('org.member'); // Changed from org.permission
 
         Route::patch('/overview', [OrgManagementController::class, 'updateOverview'])
             ->middleware('org.permission:edit_org_profile');
 
-        // Settings Management
-        Route::patch('/settings', [OrgManagementController::class, 'updateSettings'])
-            ->middleware('org.permission:manage_org_settings');
-
-        // Logo Management
-        Route::post('/logo', [OrgManagementController::class, 'uploadLogo'])
-            ->middleware('org.permission:upload_org_logo');
-
-        Route::delete('/logo', [OrgManagementController::class, 'deleteLogo'])
-            ->middleware('org.permission:upload_org_logo');
-
-        // Members Management
-        Route::get('/members', [OrgManagementController::class, 'members'])
-            // ->middleware('org.permission:view_members');
-            ->middleware('org.member');
-
-        Route::get('/members/{user}', [OrgManagementController::class, 'showMember'])
-            ->middleware('org.member');
-
-        Route::patch('/members/{user}/role', [OrgManagementController::class, 'updateMemberRole'])
-            ->middleware('org.permission:manage_member_roles');
-
-        Route::delete('/members/{user}', [OrgManagementController::class, 'removeMember'])
-            ->middleware('org.permission:remove_members');
-
-        // Join Requests
-        Route::get('/join-requests', [OrgManagementController::class, 'joinRequests'])
-            ->middleware('org.permission:approve_join_requests');
-
-        Route::post('/join-requests/{requestId}/approve', [OrgManagementController::class, 'approveRequest'])
-            ->middleware('org.permission:approve_join_requests');
-
-        Route::post('/join-requests/{requestId}/decline', [OrgManagementController::class, 'declineRequest'])
-            ->middleware('org.permission:approve_join_requests');
-
-        // Invite Management
-        Route::post('/generate-invite', [OrgManagementController::class, 'generateInviteCode'])
-            ->middleware('org.permission:manage_invite_codes');
-
-        Route::delete('/remove-invite', [OrgManagementController::class, 'removeInviteCode'])
-            ->middleware('org.permission:manage_invite_codes');
-
-        // Announcements
+        // ===== ANNOUNCEMENTS - All members can view =====
         Route::get('/announcements', [OrgManagementController::class, 'announcements'])
-            // ->middleware('org.permission:view_announcements');
-            ->middleware('org.member');
+            ->middleware('org.member'); // Changed to allow all members
 
         Route::post('/announcements', [OrgManagementController::class, 'createAnnouncement'])
             ->middleware('org.permission:create_announcements');
@@ -488,25 +424,77 @@ Route::middleware(['auth:api'])->group(function () {
         Route::delete('/announcements/{announcementId}', [OrgManagementController::class, 'deleteAnnouncement'])
             ->middleware('org.permission:delete_announcements');
 
-        // Statistics & Activity
+
+
+        // ===== MEMBERS - All members can view =====
+        Route::get('/members', [OrgManagementController::class, 'members'])
+            ->middleware('org.member'); // Changed to allow all members
+
+        Route::get('/members/{user}', [OrgManagementController::class, 'showMember'])
+            ->middleware('org.member');
+
+        // Member management requires permissions
+        Route::patch('/members/{user}/role', [OrgManagementController::class, 'updateMemberRole'])
+            ->middleware('org.permission:manage_member_roles');
+
+        Route::delete('/members/{user}', [OrgManagementController::class, 'removeMember'])
+            ->middleware('org.permission:remove_members');
+
+
+
+
+        // ===== SETTINGS - Requires permissions =====
+        Route::patch('/settings', [OrgManagementController::class, 'updateSettings'])
+            ->middleware('org.permission:manage_org_settings');
+
+        // Logo Management
+        Route::post('/logo', [OrgManagementController::class, 'uploadLogo'])
+            ->middleware('org.permission:upload_org_logo');
+
+        Route::delete('/logo', [OrgManagementController::class, 'deleteLogo'])
+            ->middleware('org.permission:upload_org_logo');
+
+
+
+        // ===== JOIN REQUESTS - Requires permissions =====
+        Route::get('/join-requests', [OrgManagementController::class, 'joinRequests'])
+            ->middleware('org.permission:approve_join_requests');
+
+        Route::post('/join-requests/{requestId}/approve', [OrgManagementController::class, 'approveRequest'])
+            ->middleware('org.permission:approve_join_requests');
+
+        Route::post('/join-requests/{requestId}/decline', [OrgManagementController::class, 'declineRequest'])
+            ->middleware('org.permission:approve_join_requests');
+
+
+        // ===== INVITE CODES - Requires permissions =====
+        Route::post('/generate-invite', [OrgManagementController::class, 'generateInviteCode'])
+            ->middleware('org.permission:manage_invite_codes');
+
+        Route::delete('/remove-invite', [OrgManagementController::class, 'removeInviteCode'])
+            ->middleware('org.permission:manage_invite_codes');
+
+
+        // ===== STATISTICS & ACTIVITY =====
         Route::get('/statistics', [OrgManagementController::class, 'statistics'])
             ->middleware('org.permission:view_statistics');
 
         Route::get('/activity-log', [OrgManagementController::class, 'activityLog'])
             ->middleware('org.permission:view_activity_logs');
 
-        // Data Export
+
+        // ===== DATA EXPORT =====
         Route::get('/export-data', [OrgManagementController::class, 'exportData'])
             ->middleware('org.permission:export_data');
 
-        // Archive/Restore
+        // ===== ARCHIVE/RESTORE =====
         Route::post('/archive', [OrgManagementController::class, 'archiveOrganization'])
             ->middleware('org.permission:archive_organization');
 
         Route::post('/restore', [OrgManagementController::class, 'restoreOrganization'])
             ->middleware('org.permission:archive_organization');
 
-        // Ownership Transfer
+        // ===== OWNERSHIP TRANSFER =====
         Route::post('/transfer-ownership', [OrgManagementController::class, 'initiateOwnershipTransfer'])
             ->middleware('org.permission:transfer_ownership');
 
@@ -516,13 +504,15 @@ Route::middleware(['auth:api'])->group(function () {
         Route::post('/transfer-ownership/{transferId}/decline', [OrgManagementController::class, 'declineOwnershipTransfer'])
             ->middleware('org.member');
 
-        // Leave Organization (any member)
+        // ===== LEAVE ORGANIZATION =====
         Route::post('/leave', [OrgManagementController::class, 'leave'])
             ->middleware('org.member');
+
 
         /** =========================================================== */
         /** ==================== Duty Management ====================== */
         /** =========================================================== */
+        #region Duty
 
         // My assignments (any member)
         Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments'])
@@ -621,7 +611,7 @@ Route::middleware(['auth:api'])->group(function () {
         Route::delete('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'destroy'])
             ->middleware('org.permission:manage_duty_templates');
 
-
+        #endregion
 
 
 
