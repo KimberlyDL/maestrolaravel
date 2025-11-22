@@ -53,7 +53,6 @@ class Kernel extends HttpKernel
 
         // Custom / Project-specific
         'jwt.auth' => \Tymon\JWTAuth\Http\Middleware\Authenticate::class,
-        'permission' => \App\Http\Middleware\CheckOrganizationPermission::class,
         'email.verified.api' => \App\Http\Middleware\EnsureEmailIsVerifiedApi::class,
     ];
 }
