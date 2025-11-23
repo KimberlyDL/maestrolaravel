@@ -21,14 +21,14 @@ class OrganizationController extends Controller
         // Determine user's relationship to this org
         $userStatus = 'none';
         $userRole = null;
-        $userId = null; // ← Add this
+        $userId = null; // â† Add this
 
         if ($user) {
             $membership = $organization->memberships()->where('user_id', $user->id)->first();
             if ($membership) {
                 $userStatus = 'member';
                 $userRole = $membership->role;
-                $userId = $user->id; // ← Add this
+                $userId = $user->id; // â† Add this
                 if ($userRole === 'admin') {
                     $userStatus = 'admin';
                 }
@@ -72,7 +72,7 @@ class OrganizationController extends Controller
             'members' => $memberCount,
             'user_status' => $userStatus,
             'user_role' => $userRole,
-            'user_id' => $userId, // ← Add this
+            'user_id' => $userId, // â† Add this
             'location' => $location,
         ]);
     }
@@ -274,7 +274,7 @@ class OrganizationController extends Controller
                     'slug'        => $o->slug,
                     'logo'        => $o->logo,
                     'description' => $o->description,
-                    // no role (I’m not a member)
+                    // no role (Iâ€™m not a member)
                 ])
                 ->values();
 

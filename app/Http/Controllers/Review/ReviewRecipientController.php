@@ -6,12 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Models\{ReviewRequest, ReviewRecipient, ReviewAction};
 use Illuminate\Http\Request;
 use App\Enums\ReviewStatus;
+use App\Services\ActivityLogger;
 
 class ReviewRecipientController extends Controller
 {
     public function update(Request $req, ReviewRequest $review, ReviewRecipient $recipient)
     {
         $this->authorize('update', $review);
+
+        // Check permission
+        if (!$req->user()->hasPermission($review->publisher_org_id, 'assign_reviewers')) {
+            return response()->json(['message' => 'You do not have permission to update reviewers'], 403);
+        }
 
         // Ensure the recipient belongs to this review
         if ((int) $recipient->review_request_id !== (int) $review->id) {
@@ -34,16 +40,18 @@ class ReviewRecipientController extends Controller
 
         // Log the action if due date changed
         if ($oldDueAt != $data['due_at']) {
-            $review->actions()->create([
-                'actor_user_id' => auth()->id(),
-                'actor_org_id' => $review->publisher_org_id,
-                'action' => 'due_date_updated',
-                'meta' => [
+            ActivityLogger::log(
+                $review->publisher_org_id,
+                'due_date_updated',
+                subjectType: 'ReviewRecipient',
+                subjectId: $recipient->id,
+                metadata: [
                     'reviewer_name' => $recipient->reviewer->name ?? 'Unknown',
                     'old_due_at' => $oldDueAt,
                     'new_due_at' => $data['due_at'],
                 ],
-            ]);
+                description: auth()->user()->name . " updated due date for {$recipient->reviewer->name}"
+            );
         }
 
         // Return the updated recipient with useful relations
@@ -80,11 +88,14 @@ class ReviewRecipientController extends Controller
             'last_viewed_at' => now()
         ]);
 
-        $review->actions()->create([
-            'actor_user_id' => auth()->id(),
-            'actor_org_id' => $recipient->reviewer_org_id,
-            'action' => 'viewed',
-        ]);
+        ActivityLogger::log(
+            $review->publisher_org_id,
+            'document_viewed',
+            subjectType: 'ReviewRecipient',
+            subjectId: $recipient->id,
+            metadata: ['review_id' => $review->id],
+            description: auth()->user()->name . " viewed the document"
+        );
 
         return response()->noContent();
     }
@@ -96,11 +107,14 @@ class ReviewRecipientController extends Controller
 
         $recipient->update(['status' => 'approved']);
 
-        $review->actions()->create([
-            'actor_user_id' => auth()->id(),
-            'actor_org_id' => $recipient->reviewer_org_id,
-            'action' => 'approved',
-        ]);
+        ActivityLogger::log(
+            $review->publisher_org_id,
+            'review_approved',
+            subjectType: 'ReviewRecipient',
+            subjectId: $recipient->id,
+            metadata: ['review_id' => $review->id],
+            description: auth()->user()->name . " approved the review"
+        );
 
         // Optional: if all recipients approved, auto-advance review status
         if ($review->recipients()->whereNot('status', 'approved')->exists() === false) {
@@ -119,12 +133,16 @@ class ReviewRecipientController extends Controller
 
         $recipient->update(['status' => 'declined']);
 
-        $review->actions()->create([
-            'actor_user_id' => auth()->id(),
-            'actor_org_id' => $recipient->reviewer_org_id,
-            'action' => 'declined',
-            'meta' => ['reason' => $req->input('reason')]
-        ]);
+        $reason = $req->input('reason');
+
+        ActivityLogger::log(
+            $review->publisher_org_id,
+            'review_declined',
+            subjectType: 'ReviewRecipient',
+            subjectId: $recipient->id,
+            metadata: ['review_id' => $review->id, 'reason' => $reason],
+            description: auth()->user()->name . " declined the review" . ($reason ? ": {$reason}" : '')
+        );
 
         $review->update(['status' => ReviewStatus::Declined->value]);
 
@@ -136,15 +154,22 @@ class ReviewRecipientController extends Controller
     {
         $this->authorize('remind', [$review, $recipient]);
 
-        $review->actions()->create([
-            'actor_user_id' => auth()->id(),
-            'actor_org_id' => $review->publisher_org_id,
-            'action' => 'reminded',
-            'meta' => [
-                'recipient_id' => $recipient->id,
+        // Check permission
+        if (!request()->user()->hasPermission($review->publisher_org_id, 'manage_reviews')) {
+            return response()->json(['message' => 'You do not have permission to send reminders'], 403);
+        }
+
+        ActivityLogger::log(
+            $review->publisher_org_id,
+            'reminder_sent',
+            subjectType: 'ReviewRecipient',
+            subjectId: $recipient->id,
+            metadata: [
+                'review_id' => $review->id,
                 'recipient_name' => $recipient->reviewer->name ?? 'Unknown',
-            ]
-        ]);
+            ],
+            description: auth()->user()->name . " sent a reminder to {$recipient->reviewer->name}"
+        );
 
         // (Optional) send notification/email
         return response()->json(['message' => 'Reminder sent']);

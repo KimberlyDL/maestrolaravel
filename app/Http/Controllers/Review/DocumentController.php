@@ -11,13 +11,13 @@ use App\Services\UploadService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use App\Models\Organization;
+use App\Services\ActivityLogger;
 
 class DocumentController extends Controller
 {
     public function __construct(private readonly UploadService $uploads) {}
 
-
-        /**
+    /**
      * Generate temporary signed URL for download
      * GET /api/documents/{document}/versions/{version}/download-url
      */
@@ -70,13 +70,12 @@ class DocumentController extends Controller
                 'file_size' => $document->file_size,
                 'mime_type' => $document->mime_type,
             ]);
-
         } catch (\Exception $e) {
             // Fallback to direct download for local disk
             if ($diskName === 'local') {
                 // Generate a one-time token for secure local download
                 $token = $this->generateSecureToken($document->id, $version->id);
-                
+
                 return response()->json([
                     'url' => route('documents.secure-download', [
                         'document' => $document->id,
@@ -206,18 +205,18 @@ class DocumentController extends Controller
             'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             'ppt' => 'application/vnd.ms-powerpoint',
             'pptx' => 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-            
+
             // Text
             'txt' => 'text/plain',
             'csv' => 'text/csv',
             'json' => 'application/json',
             'xml' => 'application/xml',
-            
+
             // Archives
             'zip' => 'application/zip',
             'rar' => 'application/x-rar-compressed',
             '7z' => 'application/x-7z-compressed',
-            
+
             // Images
             'jpg' => 'image/jpeg',
             'jpeg' => 'image/jpeg',
@@ -225,85 +224,13 @@ class DocumentController extends Controller
             'gif' => 'image/gif',
             'svg' => 'image/svg+xml',
             'webp' => 'image/webp',
-            
-            // Audio
-            'mp3' => 'audio/mpeg',
-            'wav' => 'audio/wav',
-            'ogg' => 'audio/ogg',
-            
-            // Video
-            'mp4' => 'video/mp4',
-            'webm' => 'video/webm',
-            'mov' => 'video/quicktime',
         ];
 
         return $mimeTypes[strtolower($extension)] ?? 'application/octet-stream';
     }
 
     /**
-     * Store document for storage context (Google Drive-like)
-     * FIXED: Better MIME type detection
-     */
-    private function storeStorageDocument(Request $req)
-    {
-        $data = $req->validate([
-            'organization_id' => ['required', 'exists:organizations,id'],
-            'parent_id' => ['nullable', 'exists:documents,id'],
-            'file' => ['required', 'file', 'max:51200'], // 50MB
-            'title' => ['nullable', 'string', 'max:255'],
-            'description' => ['nullable', 'string', 'max:1000'],
-            'visibility' => ['required', 'in:private,org,public'],
-        ]);
-
-        $this->authorize('uploadToStorage', $data['organization_id']);
-
-        $file = $req->file('file');
-        $originalName = $file->getClientOriginalName();
-        $title = $data['title'] ?? pathinfo($originalName, PATHINFO_FILENAME);
-
-        // Get extension and determine MIME type
-        $extension = strtolower($file->getClientOriginalExtension());
-        $mimeType = $file->getMimeType() ?: $this->getMimeTypeFromExtension($extension);
-
-        $document = null;
-        DB::transaction(function () use ($data, $file, $title, $mimeType, &$document) {
-            // Create document with proper MIME type
-            $document = Document::create([
-                'organization_id' => $data['organization_id'],
-                'parent_id' => $data['parent_id'] ?? null,
-                'title' => $title,
-                'description' => $data['description'] ?? null,
-                'context' => 'storage',
-                'visibility' => $data['visibility'],
-                'mime_type' => $mimeType,
-                'file_size' => $file->getSize(),
-                'created_by' => auth()->id(),
-                'uploaded_by' => auth()->id(),
-                'type' => 'other',
-                'published_at' => $data['visibility'] === 'public' ? now() : null,
-            ]);
-
-            // Store file
-            $stored = $this->uploads->storeDocumentVersion($document->id, $file);
-
-            // Create version
-            $version = DocumentVersion::create([
-                'document_id' => $document->id,
-                'version_number' => 1,
-                'file_path' => $stored['path'],
-                'note' => 'Initial upload',
-                'uploaded_by' => auth()->id(),
-            ]);
-
-            $document->update(['latest_version_id' => $version->id]);
-        });
-
-        return response()->json($document->load(['latestVersion', 'uploader']), 201);
-    }
-
-    /**
-     * Download a specific version
-     * FIXED: Better MIME type and filename handling
+     * Download a specific version - UPDATED METHOD
      */
     public function downloadVersion(Document $document, DocumentVersion $version)
     {
@@ -359,8 +286,95 @@ class DocumentController extends Controller
             'X-Content-Type-Options' => 'nosniff',
         ];
 
+        // Log download activity
+        if ($document->context === 'storage') {
+            ActivityLogger::log(
+                $document->organization_id,
+                'document_downloaded',
+                subjectType: 'Document',
+                subjectId: $document->id,
+                metadata: [
+                    'version' => $version->version_number,
+                    'filename' => $downloadName
+                ],
+                description: auth()->user()->name . " downloaded: {$document->title} (v{$version->version_number})"
+            );
+        }
+
         // Use Storage::download() - works universally across all disks
         return $disk->download($filePath, $downloadName, $headers);
+    }
+
+    /**
+     * Store document for storage context (Google Drive-like)
+     */
+    private function storeStorageDocument(Request $req)
+    {
+        $data = $req->validate([
+            'organization_id' => ['required', 'exists:organizations,id'],
+            'parent_id' => ['nullable', 'exists:documents,id'],
+            'file' => ['required', 'file', 'max:51200'], // 50MB
+            'title' => ['nullable', 'string', 'max:255'],
+            'description' => ['nullable', 'string', 'max:1000'],
+            'visibility' => ['required', 'in:private,org,public'],
+        ]);
+
+        // Check permission
+        if (!$req->user()->hasPermission($data['organization_id'], 'upload_documents')) {
+            return response()->json(['message' => 'You do not have permission to upload documents'], 403);
+        }
+
+        $file = $req->file('file');
+        $originalName = $file->getClientOriginalName();
+        $title = $data['title'] ?? pathinfo($originalName, PATHINFO_FILENAME);
+
+        // Get extension and determine MIME type
+        $extension = strtolower($file->getClientOriginalExtension());
+        $mimeType = $file->getMimeType() ?: $this->getMimeTypeFromExtension($extension);
+
+        $document = null;
+        DB::transaction(function () use ($data, $file, $title, $mimeType, &$document) {
+            // Create document with proper MIME type
+            $document = Document::create([
+                'organization_id' => $data['organization_id'],
+                'parent_id' => $data['parent_id'] ?? null,
+                'title' => $title,
+                'description' => $data['description'] ?? null,
+                'context' => 'storage',
+                'visibility' => $data['visibility'],
+                'mime_type' => $mimeType,
+                'file_size' => $file->getSize(),
+                'created_by' => auth()->id(),
+                'uploaded_by' => auth()->id(),
+                'type' => 'other',
+                'published_at' => $data['visibility'] === 'public' ? now() : null,
+            ]);
+
+            // Store file
+            $stored = $this->uploads->storeDocumentVersion($document->id, $file);
+
+            // Create version
+            $version = DocumentVersion::create([
+                'document_id' => $document->id,
+                'version_number' => 1,
+                'file_path' => $stored['path'],
+                'note' => 'Initial upload',
+                'uploaded_by' => auth()->id(),
+            ]);
+
+            $document->update(['latest_version_id' => $version->id]);
+        });
+
+        ActivityLogger::log(
+            $data['organization_id'],
+            'document_uploaded',
+            subjectType: 'Document',
+            subjectId: $document->id,
+            metadata: ['visibility' => $data['visibility']],
+            description: auth()->user()->name . " uploaded: {$document->title}"
+        );
+
+        return response()->json($document->load(['latestVersion', 'uploader']), 201);
     }
 
     /**
@@ -383,6 +397,11 @@ class DocumentController extends Controller
             'file'  => ['required', 'file', 'max:20480'],
             'note'  => ['nullable', 'string', 'max:2000'],
         ]);
+
+        // Check permission
+        if (!$req->user()->hasPermission($data['organization_id'], 'create_reviews')) {
+            return response()->json(['message' => 'You do not have permission to create documents'], 403);
+        }
 
         $this->authorize('createDocument', [Document::class, $data['organization_id']]);
 
@@ -409,6 +428,15 @@ class DocumentController extends Controller
             $doc->update(['latest_version_id' => $ver->id]);
         });
 
+        ActivityLogger::log(
+            $data['organization_id'],
+            'document_created',
+            subjectType: 'Document',
+            subjectId: $doc->id,
+            metadata: ['type' => $data['type']],
+            description: auth()->user()->name . " created document: {$doc->title}"
+        );
+
         return response()->json($doc->load('latestVersion'), 201);
     }
 
@@ -418,6 +446,12 @@ class DocumentController extends Controller
     public function addVersion(Request $req, Document $document)
     {
         $this->authorize('addVersion', $document);
+
+        // Check permission based on context
+        $permission = $document->context === 'storage' ? 'upload_documents' : 'manage_reviews';
+        if (!$req->user()->hasPermission($document->organization_id, $permission)) {
+            return response()->json(['message' => 'You do not have permission to add versions'], 403);
+        }
 
         $data = $req->validate([
             'file' => ['required', 'file', 'max:20480'],
@@ -455,6 +489,15 @@ class DocumentController extends Controller
             }
         });
 
+        ActivityLogger::log(
+            $document->organization_id,
+            'version_added',
+            subjectType: 'DocumentVersion',
+            subjectId: $ver->id,
+            metadata: ['document_id' => $document->id, 'version' => $ver->version_number],
+            description: auth()->user()->name . " added version {$ver->version_number} to: {$document->title}"
+        );
+
         return response()->json($ver, 201);
     }
 
@@ -487,6 +530,12 @@ class DocumentController extends Controller
 
         if (!$orgId) {
             return response()->json(['message' => 'organization_id required'], 400);
+        }
+
+        // Check permission
+        $permission = $context === 'storage' ? 'view_storage' : 'view_reviews';
+        if (!$req->user()->hasPermission($orgId, $permission)) {
+            return response()->json(['message' => 'You do not have permission to view documents'], 403);
         }
 
         if ($context === 'storage') {

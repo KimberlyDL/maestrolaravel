@@ -198,10 +198,6 @@ Route::middleware(['auth:api'])->group(function () {
     // Get document details with all versions
     Route::get('/documents/{document}', [DocumentController::class, 'show']);
 
-    // // Create new document
-    // Route::post('/documents', [DocumentController::class, 'store'])
-    //     ->middleware('org.permission:create_reviews');
-
     // Add new version to existing document
     Route::post('/documents/{document}/versions', [DocumentController::class, 'addVersion'])
         ->middleware('org.permission:create_reviews');
@@ -209,8 +205,8 @@ Route::middleware(['auth:api'])->group(function () {
     // Download specific document version
     Route::get('/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion']);
 
-    // List documents in organization
-    Route::get('/org-documents', [DocumentController::class, 'index'])
+    // ✅ FIXED: List documents in organization (now uses org-scoped route)
+    Route::get('/org/{organization}/documents', [DocumentController::class, 'index'])
         ->middleware('org.permission:view_reviews');
 
     /** Share/Access Control */
@@ -369,7 +365,7 @@ Route::middleware(['auth:api'])->group(function () {
 
         // Get specific user's permissions (any member can check - for UI)
         Route::get('/permissions/users/{user}', [PermissionController::class, 'userPermissions'])
-            ->middleware('org.member'); // ✅ Changed to org.member
+            ->middleware('org.member');
 
         // Grant/revoke (requires manage_permissions)
         Route::post('/permissions/users/{user}/grant', [PermissionController::class, 'grantPermission'])
