@@ -128,13 +128,6 @@ Route::middleware(['auth:api'])->group(function () {
     });
 
 
-
-
-
-
-
-
-
     /** Document Versions */
     Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
         ->middleware('org.permission:upload_documents');
@@ -153,9 +146,6 @@ Route::middleware(['auth:api'])->group(function () {
         '/documents/{document}/versions/{version}/download',
         [DocumentController::class, 'downloadVersion']
     );
-
-
-
 
 
     /** =============================================================== */
@@ -185,9 +175,7 @@ Route::middleware(['auth:api'])->group(function () {
         [DocumentController::class, 'secureDownload']
     )->middleware('org.permission:view_storage');
 
-
     #endregion
-
 
     /** =============================================================== */
     /** ---------------- Legacy/Review Document Routes ---------------- */
@@ -225,11 +213,7 @@ Route::middleware(['auth:api'])->group(function () {
     // // Create a thread
     // Route::post('/reviews', [ReviewRequestController::class, 'store'])
     //     ->middleware('org.permission:create_reviews');
-
-    // Read a thread
-    Route::get('/reviews/{review}', [ReviewRequestController::class, 'show'])
-        ->middleware('org.permission:view_reviews');
-
+        
     // Update thread metadata
     Route::patch('/reviews/{review}', [ReviewRequestController::class, 'update'])
         ->middleware('org.permission:manage_reviews');
@@ -281,23 +265,16 @@ Route::middleware(['auth:api'])->group(function () {
     /** --------------------- Comments (threaded) --------------------- */
     /** =============================================================== */
 
-    Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index'])
-        ->middleware('org.permission:view_reviews');
-
     Route::post('/reviews/{review}/comments', [ReviewCommentController::class, 'store'])
         ->middleware('org.permission:comment_on_reviews');
 
-    Route::get('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
-        ->middleware('org.permission:view_reviews');
-
-    /** =============================================================== */
-    /** --------------------------- Actions --------------------------- */
-    /** =============================================================== */
-
     Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
-        ->middleware('org.permission:view_activity_logs');
+            ->middleware('org.permission:view_activity_logs');
+
 
     #endregion
+
+
     /** =============================================================== */
     /** ======================== Organizations ======================== */
     /** =============================================================== */
@@ -390,11 +367,23 @@ Route::middleware(['auth:api'])->group(function () {
         Route::post('/reviews', [ReviewRequestController::class, 'store'])
             ->middleware('org.permission:create_reviews');
 
+        Route::get('/reviews', [ReviewRequestController::class, 'index'])
+            ->middleware('org.permission:view_reviews');
 
+        Route::get('/reviews/{review}', [ReviewRequestController::class, 'show'])
+            ->middleware('org.permission:view_reviews');
 
+        Route::get('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
+        ->middleware('org.permission:view_reviews');
+        
+        Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
+        ->middleware('org.permission:view_activity_logs');
 
-
-
+        Route::post('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'storeRecipientComment'])
+        ->middleware('org.permission:comment_on_reviews');
+        
+        Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index'])
+        ->middleware('org.permission:view_reviews');
 
         // Dashboard (any member)
         Route::get('/dashboard', [OrgManagementController::class, 'dashboard'])

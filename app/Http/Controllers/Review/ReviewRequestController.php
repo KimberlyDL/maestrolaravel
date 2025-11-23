@@ -13,118 +13,136 @@ class ReviewRequestController extends Controller
     /**
      * List reviews (organization-scoped)
      */
-    public function index(Request $req, Organization $organization)
-    {
-        $filter = $req->query('filter'); // 'as_publisher' | 'as_reviewer'
+    public function index(Request $req, ?Organization $organization)
+{
+    $filter = $req->query('filter'); // 'as_publisher' | 'as_reviewer'
 
-        $query = ReviewRequest::query()
-            ->with(['document', 'version', 'publisher', 'recipients.reviewer'])
-            ->where('publisher_org_id', $organization->id);
+    $query = ReviewRequest::query()
+        ->with(['document', 'version', 'publisher', 'recipients.reviewer']);
 
-        // Apply filters
-        if ($filter === 'as_publisher') {
-            $query->where('submitted_by', auth()->id());
-        } elseif ($filter === 'as_reviewer') {
-            $query->whereHas('recipients', fn($q) => $q->where('reviewer_user_id', auth()->id()));
-        }
-
-        if ($status = $req->query('status')) {
-            $query->where('status', $status);
-        }
-
-        // Simple search
-        if ($q = $req->query('q')) {
-            $query->where(function ($q2) use ($q) {
-                $q2->where('subject', 'like', "%{$q}%")
-                    ->orWhereHas('document', fn($qd) => $qd->where('title', 'like', "%{$q}%"));
-            });
-        }
-
-        return $query->orderByDesc('updated_at')->paginate(15);
+    if ($organization) {
+        $query->where('publisher_org_id', $organization->id);
+    } elseif ($filter === 'as_publisher') { $query->where('submitted_by', auth()->id()); } elseif ($filter === 'as_reviewer') {
+        $query->where('submitted_by', '!=', auth()->id()); 
+        $query->whereHas('recipients', fn($q) => $q->where('reviewer_user_id', auth()->id())); 
     }
+
+    if ($status = $req->query('status')) {
+        $query->where('status', $status);
+    }
+
+    // Simple search
+    if ($q = $req->query('q')) {
+        $query->where(function ($q2) use ($q) {
+            $q2->where('subject', 'like', "%{$q}%")
+                ->orWhereHas('document', fn($qd) => $qd->where('title', 'like', "%{$q}%"));
+        });
+    }
+
+    return $query->orderByDesc('updated_at')->paginate(15);
+}
 
     /**
      * Create review request (organization-scoped)
      */
-    public function store(Request $req, Organization $organization)
-    {
-        $data = $req->validate([
-            'document_id' => ['required', 'exists:documents,id'],
-            'document_version_id' => ['nullable', 'exists:document_versions,id'],
-            'subject' => ['required', 'string', 'max:255'],
-            'body'    => ['nullable', 'string', 'max:5000'],
-            'due_at'  => ['nullable', 'date'],
-            'recipients' => ['required', 'array', 'min:1'],
-            'recipients.*.user_id' => ['required', 'exists:users,id'],
-            'recipients.*.org_id'  => ['nullable', 'exists:organizations,id'],
-            'recipients.*.due_at'  => ['nullable', 'date'],
-            'attachments.*' => ['file', 'max:20480']
+// ReviewRequestController.php
+
+public function store(Request $req, Organization $organization)
+{
+    $data = $req->validate([
+        'document_id' => ['required', 'exists:documents,id'],
+        'document_version_id' => ['nullable', 'exists:document_versions,id'],
+        'subject' => ['required', 'string', 'max:255'],
+        'body'    => ['nullable', 'string', 'max:5000'],
+        'due_at'  => ['nullable', 'date'],
+        'recipients' => ['required', 'array', 'min:1'],
+        'recipients.*.user_id' => ['required', 'exists:users,id'],
+        'recipients.*.org_id'  => ['nullable', 'exists:organizations,id'],
+        'recipients.*.due_at'  => ['nullable', 'date'],
+        'attachments.*' => ['file', 'max:20480']
+    ]);
+    
+    $publisherId = auth()->id();
+    $recipientsData = collect($data['recipients'])
+        ->filter(fn($r) => (int)$r['user_id'] !== (int)$publisherId)
+        ->values();
+
+    if ($recipientsData->isEmpty()) {
+        return response()->json([
+            'message' => 'Cannot submit a review without valid recipients (Publisher cannot review their own document).',
+            'code' => 'NO_VALID_RECIPIENTS'
+        ], 422);
+    }
+
+    // Overwrite the recipients data with the filtered list
+    $data['recipients'] = $recipientsData->all();
+    
+    // --- Removed redundant self-assignment check ---
+
+    // Get document and verify it belongs to this organization
+    $document = Document::with('latestVersion')->findOrFail($data['document_id']);
+
+    if ($document->organization_id !== $organization->id) {
+        return response()->json([
+            'message' => 'Document does not belong to this organization'
+        ], 403);
+    }
+
+    // Authorization check
+    $this->authorize('submitForReview', [$document, $organization->id]);
+
+    // Pick version
+    $versionId = $data['document_version_id'] ?? $document->latest_version_id;
+
+    $review = ReviewRequest::create([
+        'document_id' => $document->id,
+        'document_version_id' => $versionId,
+        'publisher_org_id' => $organization->id,
+        'submitted_by' => auth()->id(),
+        'subject' => $data['subject'],
+        'body'    => $data['body'] ?? null,
+        'status'  => ReviewStatus::Sent->value,
+        'due_at'  => $data['due_at'] ?? null,
+    ]);
+
+    // Create recipients
+    foreach ($data['recipients'] as $r) {
+        ReviewRecipient::create([
+            'review_request_id' => $review->id,
+            'reviewer_user_id'  => $r['user_id'],
+            'reviewer_org_id'   => $r['org_id'] ?? null,
+            'status'            => 'pending',
+            'due_at'            => $r['due_at'] ?? null,
         ]);
+    }
 
-        // Get document and verify it belongs to this organization
-        $document = Document::with('latestVersion')->findOrFail($data['document_id']);
-
-        if ($document->organization_id !== $organization->id) {
-            return response()->json([
-                'message' => 'Document does not belong to this organization'
-            ], 403);
-        }
-
-        // Authorization check
-        $this->authorize('submitForReview', [$document, $organization->id]);
-
-        // Pick version
-        $versionId = $data['document_version_id'] ?? $document->latest_version_id;
-
-        $review = ReviewRequest::create([
-            'document_id' => $document->id,
-            'document_version_id' => $versionId,
-            'publisher_org_id' => $organization->id,
-            'submitted_by' => auth()->id(),
-            'subject' => $data['subject'],
-            'body'    => $data['body'] ?? null,
-            'status'  => ReviewStatus::Sent->value,
-            'due_at'  => $data['due_at'] ?? null,
-        ]);
-
-        // Create recipients
-        foreach ($data['recipients'] as $r) {
-            ReviewRecipient::create([
-                'review_request_id' => $review->id,
-                'reviewer_user_id'  => $r['user_id'],
-                'reviewer_org_id'   => $r['org_id'] ?? null,
-                'status'            => 'pending',
-                'due_at'            => $r['due_at'] ?? null,
+    // Save attachments
+    if ($req->hasFile('attachments')) {
+        foreach ($req->file('attachments') as $file) {
+            $path = $file->store("reviews/{$review->id}/attachments", 'public');
+            $review->attachments()->create([
+                'uploaded_by' => auth()->id(),
+                'file_path'   => $path,
+                'label'       => $file->getClientOriginalName()
             ]);
         }
-
-        // Save attachments
-        if ($req->hasFile('attachments')) {
-            foreach ($req->file('attachments') as $file) {
-                $path = $file->store("reviews/{$review->id}/attachments", 'public');
-                $review->attachments()->create([
-                    'uploaded_by' => auth()->id(),
-                    'file_path'   => $path,
-                    'label'       => $file->getClientOriginalName()
-                ]);
-            }
-        }
-
-        // Log action
-        ActivityLogger::log(
-            $organization->id,
-            'review_sent',
-            subjectType: 'ReviewRequest',
-            subjectId: $review->id,
-            metadata: [
-                'subject' => $review->subject,
-                'recipients_count' => count($data['recipients'])
-            ],
-            description: auth()->user()->name . " sent review: {$review->subject}"
-        );
-
-        return response()->json($review->load(['recipients.reviewer', 'document', 'version']), 201);
     }
+
+    // Log action
+    ActivityLogger::log(
+        $organization->id,
+        'review_sent',
+        subjectType: 'ReviewRequest',
+        subjectId: $review->id,
+        metadata: [
+            'subject' => $review->subject,
+            'recipients_count' => count($data['recipients'])
+        ],
+        description: auth()->user()->name . " sent review: {$review->subject}"
+    );
+
+    return response()->json($review->load(['recipients.reviewer', 'document', 'version']), 201);
+}
 
     /**
      * Show review (organization-scoped)
