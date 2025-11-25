@@ -33,91 +33,6 @@ use App\Http\Controllers\StorageController;
 
 Route::middleware(['auth:api'])->group(function () {
 
-    /** =============================================================== */
-    /** ============= Document Storage (Google Drive-like) ============ */
-    /** =============================================================== */
-
-    #region Storage
-
-    // List documents/folders in organization storage
-    Route::get('/storage', [StorageController::class, 'index'])
-        ->middleware('org.permission:view_storage');
-
-    // List public documents (any authenticated user)
-    Route::get('/storage/public', [StorageController::class, 'publicIndex']);
-
-    // Get storage statistics
-    Route::get('/storage/statistics', [StorageController::class, 'statistics'])
-        ->middleware('org.permission:view_statistics');
-
-    // Create folder
-    Route::post('/storage/folders', [StorageController::class, 'createFolder'])
-        ->middleware('org.permission:create_folders');
-
-    // Upload file
-    Route::post('/storage/upload', [StorageController::class, 'upload'])
-        ->middleware('org.permission:upload_documents');
-
-    // Get document/folder details
-    Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
-        ->middleware('org.permission:view_storage');
-
-    // Update document/folder
-    Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
-        ->middleware('org.permission:upload_documents');
-
-    // Delete document/folder
-    Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
-        ->middleware('org.permission:delete_documents');
-
-    // Move document/folder
-    Route::post('/storage/documents/{document}/move', [StorageController::class, 'move'])
-        ->middleware('org.permission:upload_documents');
-
-    // Copy document
-    Route::post('/storage/documents/{document}/copy', [StorageController::class, 'copy'])
-        ->middleware('org.permission:upload_documents');
-
-    // /** Document Sharing */
-    // Route::get('/storage/documents/{document}/share', [DocumentShareController::class, 'getShare'])
-    //     ->middleware('org.permission:view_storage');
-
-    // Route::patch('/storage/documents/{document}/share', [DocumentShareController::class, 'updateShare'])
-    //     ->middleware('org.permission:manage_document_sharing');
-
-    // Route::post('/storage/documents/{document}/share/revoke', [DocumentShareController::class, 'revokeShare'])
-    //     ->middleware('org.permission:manage_document_sharing');
-
-
-    /** Enhanced Document Sharing - Storage Context */
-    Route::prefix('storage/documents/{document}')->group(function () {
-
-        // Get share configuration
-        // User needs: view_storage permission OR be document owner
-        Route::get('/share', [DocumentShareController::class, 'getShare'])
-            ->middleware('org.permission:view_storage');
-
-        // Update share settings (password, expiry, download limits, IP restrictions)
-        // User needs: manage_document_sharing permission OR be document owner
-        Route::patch('/share', [DocumentShareController::class, 'updateShare'])
-            ->middleware('org.permission:manage_document_sharing');
-
-        // Revoke share link
-        // User needs: manage_document_sharing permission OR be document owner
-        Route::post('/share/revoke', [DocumentShareController::class, 'revokeShare'])
-            ->middleware('org.permission:manage_document_sharing');
-
-        // Get share statistics (views, downloads, etc.)
-        // User needs: view_storage permission OR be document owner
-        Route::get('/share/stats', [DocumentShareController::class, 'getShareStats'])
-            ->middleware('org.permission:view_storage');
-
-        // Get access logs for this share
-        // User needs: view_storage permission OR be document owner
-        Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs'])
-            ->middleware('org.permission:view_storage');
-    });
-
     // Maintain backward compatibility with document sharing (review context)
     Route::prefix('documents/{document}')->group(function () {
         Route::get('/share', [DocumentShareController::class, 'getShare']);
@@ -300,6 +215,7 @@ Route::middleware(['auth:api'])->group(function () {
 
     #region Org Management
     // List organizations (my orgs or others)
+    // @FE ReviewUpload
     Route::get('/organizations', [OrganizationController::class, 'index']);
 
     // Create organization (any authenticated user)
@@ -316,7 +232,7 @@ Route::middleware(['auth:api'])->group(function () {
     Route::get('/organizations/{organization}', [OrganizationController::class, 'show']);
 
     // View members (requires permission)
-    // gamit din ni doc review docfile uplaod
+    // @FE ReviewUpload
     Route::get('/organizations/{organization}/members', [OrganizationController::class, 'members'])
         // ->middleware('org.permission:view_members')
     ;
@@ -383,36 +299,97 @@ Route::middleware(['auth:api'])->group(function () {
 
         #region Doc Review
 
-        // Upload new version to review
-        Route::post('/reviews/{review}/versions', [ReviewRequestController::class, 'attachNewVersion'])
-            ->middleware('org.permission:manage_reviews');
+        // // Upload new version to review
+        // Route::post('/reviews/{review}/versions', [ReviewRequestController::class, 'attachNewVersion'])
+        //     ->middleware('org.permission:manage_reviews');
 
+
+        // // Create a thread
+        // // @FE ReviewUpload
+        // Route::post('/reviews', [ReviewRequestController::class, 'store'])
+        //     ->middleware('org.permission:create_reviews');
+
+        // Route::get('/reviews', [ReviewRequestController::class, 'index'])
+        //     ->middleware('org.permission:view_reviews');
+
+        // Route::get('/reviews/{review}', [ReviewRequestController::class, 'show'])
+        //     ->middleware('org.permission:view_reviews');
+
+        // Route::get('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
+        //     ->middleware('org.permission:view_reviews');
+
+        // Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
+        //     ->middleware('org.permission:view_activity_logs');
+
+        // Route::post('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'storeRecipientComment'])
+        //     ->middleware('org.permission:comment_on_reviews');
+
+        // Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index'])
+        //     ->middleware('org.permission:view_reviews');
+
+
+
+
+
+        // @FE ReviewUpload
         Route::post('/documents', [DocumentController::class, 'store'])
             ->middleware('org.permission:create_reviews');
 
-        // Create a thread
+        // Review listing with filters
+        Route::get('/reviews', [ReviewRequestController::class, 'index'])
+            ->middleware('org.member'); // All members can list (filtered by role)
+
+        Route::get('/reviews/{review}', [ReviewRequestController::class, 'show'])
+            ->middleware('org.member');
+
+        // Create review
+        // @FE ReviewUpload
         Route::post('/reviews', [ReviewRequestController::class, 'store'])
             ->middleware('org.permission:create_reviews');
 
-        Route::get('/reviews', [ReviewRequestController::class, 'index'])
-            ->middleware('org.permission:view_reviews');
+        // Update review details (submitter or admin)
+        Route::patch('/reviews/{review}/details', [ReviewRequestController::class, 'updateDetails'])
+            ->middleware('org.member');
 
-        Route::get('/reviews/{review}', [ReviewRequestController::class, 'show'])
-            ->middleware('org.permission:view_reviews');
+        // Update recipient due date (submitter or admin)
+        Route::patch('/reviews/{review}/recipients/{recipient}/due', [ReviewRequestController::class, 'updateRecipientDue'])
+            ->middleware('org.member');
 
+        // Remind reviewer (submitter or admin)
+        Route::post('/reviews/{review}/recipients/{recipient}/remind', [ReviewRequestController::class, 'remindReviewer'])
+            ->middleware('org.member');
+
+        // ADMIN ONLY: Approve/Reject submissions
+        Route::post('/reviews/{review}/approve', [ReviewRequestController::class, 'approve'])
+            ->middleware('org.admin'); // Only admins
+
+        Route::post('/reviews/{review}/reject', [ReviewRequestController::class, 'reject'])
+            ->middleware('org.admin'); // Only admins
+
+        // Other review actions
+        Route::post('/reviews/{review}/close', [ReviewRequestController::class, 'close'])
+            ->middleware('org.permission:manage_reviews');
+
+        Route::post('/reviews/{review}/reopen', [ReviewRequestController::class, 'reopen'])
+            ->middleware('org.permission:manage_reviews');
+
+        Route::post('/reviews/{review}/versions', [ReviewRequestController::class, 'attachNewVersion'])
+            ->middleware('org.permission:manage_reviews');
+
+        // Comments and activity
         Route::get('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
-            ->middleware('org.permission:view_reviews');
+            ->middleware('org.member');
+
+        Route::post('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'storeRecipientComment'])
+            ->middleware('org.member');
 
         Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
             ->middleware('org.permission:view_activity_logs');
 
-        Route::post('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'storeRecipientComment'])
-            ->middleware('org.permission:comment_on_reviews');
-
-        Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index'])
-            ->middleware('org.permission:view_reviews');
-
         #endregion
+
+
+
         #region Dashboard
 
         // Dashboard (any member)

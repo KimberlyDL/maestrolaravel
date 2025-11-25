@@ -12,52 +12,20 @@ class ReviewRequestController extends Controller
 {
     /**
      * List reviews (organization-scoped)
+     * Added support for approval_status filter
      */
-    // public function index(Request $req, ?Organization $organization)
-    // {
-    //     $filter = $req->query('filter'); // 'as_publisher' | 'as_reviewer'
-
-    //     $query = ReviewRequest::query()
-    //         ->with(['document', 'version', 'publisher', 'recipients.reviewer']);
-
-    //     if ($organization) {
-    //         $query->where('publisher_org_id', $organization->id);
-    //     } elseif ($filter === 'as_publisher') {
-    //         $query->where('submitted_by', auth()->id());
-    //     } elseif ($filter === 'as_reviewer') {
-    //         $query->where('submitted_by', '!=', auth()->id());
-    //         $query->whereHas('recipients', fn($q) => $q->where('reviewer_user_id', auth()->id()));
-    //     }
-
-    //     if ($status = $req->query('status')) {
-    //         $query->where('status', $status);
-    //     }
-
-    //     // Simple search
-    //     if ($q = $req->query('q')) {
-    //         $query->where(function ($q2) use ($q) {
-    //             $q2->where('subject', 'like', "%{$q}%")
-    //                 ->orWhereHas('document', fn($qd) => $qd->where('title', 'like', "%{$q}%"));
-    //         });
-    //     }
-
-    //     return $query->orderByDesc('updated_at')->paginate(15);
-    // }
-
-    // app/Http/Controllers/Review/ReviewRequestController.php
-
     public function index(Request $req, ?Organization $organization)
     {
-        $filter = $req->query('filter'); // 'as_publisher' | 'as_reviewer'
+        $filter = $req->query('filter'); // 'as_publisher' | 'as_reviewer' | 'pending_approval'
         $userId = auth()->id();
 
         $query = ReviewRequest::query()
-            ->with(['document', 'version', 'publisher', 'recipients.reviewer']);
+            ->with(['document', 'version', 'publisher', 'recipients.reviewer', 'submitter', 'approver', 'rejector']);
 
         if ($organization) {
             // Organization-scoped queries
             if ($filter === 'as_publisher') {
-                // "All Submissions" - Documents I submitted FROM this org TO other orgs
+                // Member view: Documents I submitted FROM this org
                 $query->where('publisher_org_id', $organization->id)
                     ->where('submitted_by', $userId);
             } elseif ($filter === 'as_reviewer') {
@@ -69,6 +37,14 @@ class ReviewRequestController extends Controller
                         $q->where('reviewer_user_id', $userId)
                             ->where('reviewer_org_id', $organization->id)
                     );
+            } elseif ($filter === 'pending_approval') {
+                // Admin view: All submissions needing approval
+                $query->where('publisher_org_id', $organization->id)
+                    ->where('approval_status', 'pending')
+                    ->where('status', ReviewStatus::Sent);
+            } elseif ($filter === 'all_submissions') {
+                // Admin view: All submissions in this org
+                $query->where('publisher_org_id', $organization->id);
             } else {
                 // Default: all reviews in this org (admin view)
                 $query->where('publisher_org_id', $organization->id);
@@ -78,11 +54,7 @@ class ReviewRequestController extends Controller
             if ($filter === 'as_publisher') {
                 $query->where('submitted_by', $userId);
             } elseif ($filter === 'as_reviewer') {
-                $query->whereHas(
-                    'recipients',
-                    fn($q) =>
-                    $q->where('reviewer_user_id', $userId)
-                );
+                $query->whereHas('recipients', fn($q) => $q->where('reviewer_user_id', $userId));
             }
         }
 
@@ -91,21 +63,98 @@ class ReviewRequestController extends Controller
             $query->where('status', $status);
         }
 
+        // Approval status filter
+        if ($approvalStatus = $req->query('approval_status')) {
+            $query->where('approval_status', $approvalStatus);
+        }
+
         // Search
         if ($q = $req->query('q')) {
             $query->where(function ($q2) use ($q) {
                 $q2->where('subject', 'like', "%{$q}%")
-                    ->orWhereHas(
-                        'document',
-                        fn($qd) =>
-                        $qd->where('title', 'like', "%{$q}%")
-                    );
+                    ->orWhereHas('document', fn($qd) => $qd->where('title', 'like', "%{$q}%"));
             });
         }
 
         return $query->orderByDesc('updated_at')->paginate(15);
     }
 
+
+    /**
+     * Admin approve review submission
+     */
+    public function approve(Organization $organization, ReviewRequest $review, Request $req)
+    {
+        // Verify review belongs to this organization
+        if ($review->publisher_org_id !== $organization->id) {
+            return response()->json(['message' => 'Review not found in this organization'], 404);
+        }
+
+        // Check if user is admin
+        if (!$organization->isUserAdmin(auth()->id())) {
+            return response()->json(['message' => 'Only admins can approve reviews'], 403);
+        }
+
+        if ($review->approval_status !== 'pending') {
+            return response()->json(['message' => 'Review has already been processed'], 400);
+        }
+
+        $review->approve(auth()->id());
+
+        ActivityLogger::log(
+            $organization->id,
+            'review_approved_by_admin',
+            subjectType: 'ReviewRequest',
+            subjectId: $review->id,
+            metadata: ['submitter' => $review->submitter->name],
+            description: auth()->user()->name . " approved review submission: {$review->subject}"
+        );
+
+        return response()->json([
+            'message' => 'Review approved successfully',
+            'review' => $review->load(['approver', 'submitter'])
+        ]);
+    }
+
+    /**
+     * Admin reject review submission
+     */
+    public function reject(Organization $organization, ReviewRequest $review, Request $req)
+    {
+        // Verify review belongs to this organization
+        if ($review->publisher_org_id !== $organization->id) {
+            return response()->json(['message' => 'Review not found in this organization'], 404);
+        }
+
+        // Check if user is admin
+        if (!$organization->isUserAdmin(auth()->id())) {
+            return response()->json(['message' => 'Only admins can reject reviews'], 403);
+        }
+
+        if ($review->approval_status !== 'pending') {
+            return response()->json(['message' => 'Review has already been processed'], 400);
+        }
+
+        $data = $req->validate([
+            'reason' => 'nullable|string|max:500'
+        ]);
+
+        $review->reject(auth()->id(), $data['reason'] ?? null);
+
+        ActivityLogger::log(
+            $organization->id,
+            'review_rejected_by_admin',
+            subjectType: 'ReviewRequest',
+            subjectId: $review->id,
+            metadata: ['submitter' => $review->submitter->name, 'reason' => $data['reason'] ?? null],
+            description: auth()->user()->name . " rejected review submission: {$review->subject}"
+        );
+
+        return response()->json([
+            'message' => 'Review rejected successfully',
+            'review' => $review->load(['rejector', 'submitter'])
+        ]);
+    }
 
     /**
      * Show review (Global - for cross-org access)
@@ -313,6 +362,124 @@ class ReviewRequestController extends Controller
         }
 
         return $review->load('recipients.reviewer');
+    }
+
+
+    /**
+     * Update review details (subject, body, due_at)
+     */
+    public function updateDetails(Organization $organization, ReviewRequest $review, Request $req)
+    {
+        // Verify review belongs to this organization
+        if ($review->publisher_org_id !== $organization->id) {
+            return response()->json(['message' => 'Review not found in this organization'], 404);
+        }
+
+        // Only submitter or admin can update
+        if ($review->submitted_by !== auth()->id() && !$organization->isUserAdmin(auth()->id())) {
+            return response()->json(['message' => 'You do not have permission to update this review'], 403);
+        }
+
+        $data = $req->validate([
+            'subject' => 'sometimes|string|max:255',
+            'body' => 'sometimes|nullable|string|max:5000',
+            'due_at' => 'sometimes|nullable|date',
+        ]);
+
+        $review->update($data);
+
+        ActivityLogger::log(
+            $organization->id,
+            'review_details_updated',
+            subjectType: 'ReviewRequest',
+            subjectId: $review->id,
+            metadata: ['updated_fields' => array_keys($data)],
+            description: auth()->user()->name . " updated review: {$review->subject}"
+        );
+
+        return response()->json([
+            'message' => 'Review updated successfully',
+            'review' => $review->fresh()
+        ]);
+    }
+
+    /**
+     * Update recipient due date
+     */
+    public function updateRecipientDue(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient, Request $req)
+    {
+        // Verify review belongs to this organization
+        if ($review->publisher_org_id !== $organization->id) {
+            return response()->json(['message' => 'Review not found in this organization'], 404);
+        }
+
+        // Only submitter or admin can update
+        if ($review->submitted_by !== auth()->id() && !$organization->isUserAdmin(auth()->id())) {
+            return response()->json(['message' => 'You do not have permission to update recipients'], 403);
+        }
+
+        if ($recipient->review_request_id !== $review->id) {
+            return response()->json(['message' => 'Recipient not found for this review'], 404);
+        }
+
+        $data = $req->validate([
+            'due_at' => 'nullable|date'
+        ]);
+
+        $recipient->update(['due_at' => $data['due_at']]);
+
+        ActivityLogger::log(
+            $organization->id,
+            'recipient_due_date_updated',
+            subjectType: 'ReviewRecipient',
+            subjectId: $recipient->id,
+            metadata: ['reviewer' => $recipient->reviewer->name, 'new_due_at' => $data['due_at']],
+            description: auth()->user()->name . " updated due date for {$recipient->reviewer->name}"
+        );
+
+        return response()->json([
+            'message' => 'Due date updated successfully',
+            'recipient' => $recipient->fresh()
+        ]);
+    }
+
+
+    /**
+     * Remind reviewer
+     */
+    public function remindReviewer(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
+    {
+        // Verify review belongs to this organization
+        if ($review->publisher_org_id !== $organization->id) {
+            return response()->json(['message' => 'Review not found in this organization'], 404);
+        }
+
+        // Only submitter or admin can send reminders
+        if ($review->submitted_by !== auth()->id() && !$organization->isUserAdmin(auth()->id())) {
+            return response()->json(['message' => 'You do not have permission to send reminders'], 403);
+        }
+
+        if ($recipient->review_request_id !== $review->id) {
+            return response()->json(['message' => 'Recipient not found for this review'], 404);
+        }
+
+        // Don't remind if already responded
+        if (in_array($recipient->status, ['approved', 'declined'])) {
+            return response()->json(['message' => 'Reviewer has already responded'], 400);
+        }
+
+        ActivityLogger::log(
+            $organization->id,
+            'reviewer_reminded',
+            subjectType: 'ReviewRecipient',
+            subjectId: $recipient->id,
+            metadata: ['reviewer' => $recipient->reviewer->name],
+            description: auth()->user()->name . " sent a reminder to {$recipient->reviewer->name}"
+        );
+
+        // TODO: Send actual notification/email here
+
+        return response()->json(['message' => 'Reminder sent successfully']);
     }
 
     /**

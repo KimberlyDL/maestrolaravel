@@ -9,15 +9,17 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('review_requests', function (Blueprint $table) {
-            // Add admin approval fields
-            $table->boolean('requires_admin_approval')->default(false)->after('status');
-            $table->enum('admin_approval_status', ['pending', 'approved', 'declined'])->nullable()->after('requires_admin_approval');
-            $table->foreignId('approved_by')->nullable()->after('admin_approval_status')->constrained('users')->nullOnDelete();
+            // Add approval workflow fields
+            $table->enum('approval_status', ['pending', 'approved', 'rejected'])->default('pending')->after('status');
+            $table->foreignId('approved_by')->nullable()->constrained('users')->after('approval_status');
             $table->timestamp('approved_at')->nullable()->after('approved_by');
-            $table->text('admin_note')->nullable()->after('approved_at');
+            $table->text('rejection_reason')->nullable()->after('approved_at');
+            $table->foreignId('rejected_by')->nullable()->constrained('users')->after('rejection_reason');
+            $table->timestamp('rejected_at')->nullable()->after('rejected_by');
 
-            // Index for querying pending approvals
-            $table->index(['publisher_org_id', 'admin_approval_status', 'created_at'], 'idx_org_approval_status');
+            // Add index for filtering
+            $table->index(['publisher_org_id', 'approval_status']);
+            $table->index(['submitted_by', 'approval_status']);
         });
     }
 
@@ -25,13 +27,17 @@ return new class extends Migration
     {
         Schema::table('review_requests', function (Blueprint $table) {
             $table->dropForeign(['approved_by']);
-            $table->dropIndex('idx_org_approval_status');
+            $table->dropForeign(['rejected_by']);
+            $table->dropIndex(['publisher_org_id', 'approval_status']);
+            $table->dropIndex(['submitted_by', 'approval_status']);
+
             $table->dropColumn([
-                'requires_admin_approval',
-                'admin_approval_status',
+                'approval_status',
                 'approved_by',
                 'approved_at',
-                'admin_note'
+                'rejection_reason',
+                'rejected_by',
+                'rejected_at'
             ]);
         });
     }
