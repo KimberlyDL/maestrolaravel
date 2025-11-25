@@ -213,7 +213,7 @@ Route::middleware(['auth:api'])->group(function () {
     // // Create a thread
     // Route::post('/reviews', [ReviewRequestController::class, 'store'])
     //     ->middleware('org.permission:create_reviews');
-        
+
     // Update thread metadata
     Route::patch('/reviews/{review}', [ReviewRequestController::class, 'update'])
         ->middleware('org.permission:manage_reviews');
@@ -269,9 +269,28 @@ Route::middleware(['auth:api'])->group(function () {
         ->middleware('org.permission:comment_on_reviews');
 
     Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
-            ->middleware('org.permission:view_activity_logs');
+        ->middleware('org.permission:view_activity_logs');
 
 
+
+
+
+    // Global review access (not org-scoped) - for cross-org viewing
+    Route::get('/reviews/{review}', [ReviewRequestController::class, 'showGlobal'])
+        ->middleware('auth:api');
+
+    Route::get(
+        '/reviews/{review}/recipients/{recipient}/comments',
+        [ReviewCommentController::class, 'recipientCommentsGlobal']
+    )
+        ->middleware('auth:api');
+
+    Route::post(
+        '/reviews/{review}/recipients/{recipient}/comments',
+        [ReviewCommentController::class, 'storeRecipientCommentGlobal']
+    )
+        ->middleware('auth:api');
+    
     #endregion
 
 
@@ -293,9 +312,11 @@ Route::middleware(['auth:api'])->group(function () {
     Route::delete('/organizations/requests/{requestId}', [OrganizationController::class, 'cancelRequest']);
 
     // View organization (public or member)
+    // gamit din ni doc review docfile uplaod 
     Route::get('/organizations/{organization}', [OrganizationController::class, 'show']);
 
     // View members (requires permission)
+    // gamit din ni doc review docfile uplaod
     Route::get('/organizations/{organization}/members', [OrganizationController::class, 'members'])
         // ->middleware('org.permission:view_members')
     ;
@@ -360,7 +381,13 @@ Route::middleware(['auth:api'])->group(function () {
         /** ---------- DOC REVIEW FEATURE (Admin Dashboard) ---------- */
         /** =============================================================== */
 
-        Route::post('/documents', [DocumentController::class, 'store']) // <-- ADD THIS LINE
+        #region Doc Review
+
+        // Upload new version to review
+        Route::post('/reviews/{review}/versions', [ReviewRequestController::class, 'attachNewVersion'])
+            ->middleware('org.permission:manage_reviews');
+
+        Route::post('/documents', [DocumentController::class, 'store'])
             ->middleware('org.permission:create_reviews');
 
         // Create a thread
@@ -374,16 +401,19 @@ Route::middleware(['auth:api'])->group(function () {
             ->middleware('org.permission:view_reviews');
 
         Route::get('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
-        ->middleware('org.permission:view_reviews');
-        
+            ->middleware('org.permission:view_reviews');
+
         Route::get('/reviews/{review}/actions', [ReviewRequestController::class, 'getActivityLog'])
-        ->middleware('org.permission:view_activity_logs');
+            ->middleware('org.permission:view_activity_logs');
 
         Route::post('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'storeRecipientComment'])
-        ->middleware('org.permission:comment_on_reviews');
-        
+            ->middleware('org.permission:comment_on_reviews');
+
         Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index'])
-        ->middleware('org.permission:view_reviews');
+            ->middleware('org.permission:view_reviews');
+
+        #endregion
+        #region Dashboard
 
         // Dashboard (any member)
         Route::get('/dashboard', [OrgManagementController::class, 'dashboard'])
@@ -410,7 +440,8 @@ Route::middleware(['auth:api'])->group(function () {
             ->middleware('org.permission:delete_announcements');
 
 
-
+        #endregion
+        #region Members
         // ===== MEMBERS - All members can view =====
         Route::get('/members', [OrgManagementController::class, 'members'])
             ->middleware('org.member'); // Changed to allow all members
@@ -425,8 +456,9 @@ Route::middleware(['auth:api'])->group(function () {
         Route::delete('/members/{user}', [OrgManagementController::class, 'removeMember'])
             ->middleware('org.permission:remove_members');
 
+        #endregion
 
-
+        #region Settings Endpoint
 
         // ===== SETTINGS - Requires permissions =====
         Route::patch('/settings', [OrgManagementController::class, 'updateSettings'])
@@ -467,7 +499,6 @@ Route::middleware(['auth:api'])->group(function () {
         Route::get('/activity-log', [OrgManagementController::class, 'activityLog'])
             ->middleware('org.permission:view_activity_logs');
 
-
         // ===== DATA EXPORT =====
         Route::get('/export-data', [OrgManagementController::class, 'exportData'])
             ->middleware('org.permission:export_data');
@@ -493,6 +524,7 @@ Route::middleware(['auth:api'])->group(function () {
         Route::post('/leave', [OrgManagementController::class, 'leave'])
             ->middleware('org.member');
 
+        #endregion
 
         /** =========================================================== */
         /** ==================== Duty Management ====================== */
@@ -606,6 +638,7 @@ Route::middleware(['auth:api'])->group(function () {
         /** ============= Document Storage (Google Drive-like) ============ */
         /** =============================================================== */
 
+        #region Storage
         // Storage Access (Index, Stats) - Uses the {organization} parameter
         Route::get('/storage', [StorageController::class, 'index'])
             ->middleware('org.permission:view_storage');
@@ -645,10 +678,13 @@ Route::middleware(['auth:api'])->group(function () {
         )->middleware('org.permission:view_storage');
     });
 
+    #endregion
+
     /** =============================================================== */
     /** ------------ Global Announcements (Authenticated) ------------ */
     /** =============================================================== */
 
+    #region Global Announcements
     // Paginated feed for infinite scroll (NEW - preferred endpoint)
     Route::get('/announcements/feed', [AnnouncementController::class, 'feed'])
         ->middleware('auth:api');
@@ -669,6 +705,7 @@ Route::middleware(['auth:api'])->group(function () {
     Route::delete('/announcements/{id}', [AnnouncementController::class, 'destroy'])
         ->middleware(['auth:api', 'org.permission:delete_announcements']);
 
+    #endregion
     /** =============================================================== */
     /** ======================== Me Endpoints ========================= */
     /** =============================================================== */

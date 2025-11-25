@@ -130,9 +130,9 @@ class ReviewCommentController extends Controller
 
         // Get all comments from this specific reviewer
         $comments = $review->comments()
-            ->where(function($q) use ($recipient, $publisherId) {
+            ->where(function ($q) use ($recipient, $publisherId) {
                 $q->where('author_user_id', $recipient->reviewer_user_id)
-                  ->orWhere('author_user_id', $publisherId);
+                    ->orWhere('author_user_id', $publisherId);
             })
             ->with(['author:id,name,email,avatar,avatar_url', 'attachments'])
             ->orderBy('created_at', 'asc')
@@ -163,7 +163,7 @@ class ReviewCommentController extends Controller
     /**
      * Post a comment in a private recipient conversation
      */
-public function storeRecipientComment(Request $req, Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
+    public function storeRecipientComment(Request $req, Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
     {
         // $this->authorize('view', $review);
 
@@ -228,6 +228,135 @@ public function storeRecipientComment(Request $req, Organization $organization, 
                 'name' => $user->name,
                 'email' => $user->email,
                 'avatar' => $user->avatar ?? $user->avatar_url,
+            ],
+            'author_user_id' => $comment->author_user_id,
+            'author_org_id' => $comment->author_org_id,
+            'attachments' => $comment->attachments,
+        ], 201);
+    }
+
+
+
+
+
+
+    /**
+     * Get recipient comments (Global)
+     */
+    public function recipientCommentsGlobal(ReviewRequest $review, ReviewRecipient $recipient)
+    {
+        $userId = auth()->id();
+
+        // Verify access
+        if ($recipient->review_request_id !== $review->id) {
+            abort(404, 'Recipient not found for this review');
+        }
+
+        $isPublisher = $review->submitted_by === $userId;
+        $isRecipient = $recipient->reviewer_user_id === $userId;
+
+        if (!$isPublisher && !$isRecipient) {
+            abort(403, 'Unauthorized');
+        }
+
+        $publisherId = $review->submitted_by;
+
+        $comments = $review->comments()
+            ->where(function ($q) use ($recipient, $publisherId) {
+                $q->where('author_user_id', $recipient->reviewer_user_id)
+                    ->orWhere('author_user_id', $publisherId);
+            })
+            ->with(['author:id,name,email,avatar,avatar_url', 'attachments'])
+            ->orderBy('created_at', 'asc')
+            ->get()
+            ->map(function ($comment) {
+                return [
+                    'id'             => $comment->id,
+                    'body'           => $comment->body,
+                    'is_internal'    => $comment->is_internal,
+                    'parent_id'      => $comment->parent_id,
+                    'created_at'     => $comment->created_at,
+                    'updated_at'     => $comment->updated_at,
+                    'author'         => $comment->author ? [
+                        'id'     => $comment->author->id,
+                        'name'   => $comment->author->name,
+                        'email'  => $comment->author->email,
+                        'avatar' => $comment->author->avatar ?? $comment->author->avatar_url,
+                    ] : null,
+                    'author_user_id' => $comment->author_user_id,
+                    'author_org_id'  => $comment->author_org_id,
+                    'attachments'    => $comment->attachments,
+                ];
+            });
+
+        return response()->json($comments);
+    }
+
+    /**
+     * Store recipient comment (Global)
+     */
+    public function storeRecipientCommentGlobal(Request $req, ReviewRequest $review, ReviewRecipient $recipient)
+    {
+        $userId = auth()->id();
+
+        if ($recipient->review_request_id !== $review->id) {
+            abort(404, 'Recipient not found for this review');
+        }
+
+        $isPublisher = $review->submitted_by === $userId;
+        $isRecipient = $recipient->reviewer_user_id === $userId;
+
+        if (!$isPublisher && !$isRecipient) {
+            abort(403, 'Unauthorized to post in this conversation');
+        }
+
+        $data = $req->validate([
+            'body' => ['required', 'string', 'max:10000'],
+            'attachments.*' => ['file', 'max:20480']
+        ]);
+
+        $userOrg = $req->user()->organizations()->first();
+
+        $comment = $review->comments()->create([
+            'author_user_id' => $userId,
+            'author_org_id'  => $userOrg->id ?? null,
+            'body' => $data['body'],
+            'is_internal' => false,
+            'parent_id' => null,
+        ]);
+
+        if ($req->hasFile('attachments')) {
+            foreach ($req->file('attachments') as $file) {
+                $path = $file->store("reviews/{$review->id}/comments/{$comment->id}", 'public');
+                $comment->attachments()->create([
+                    'uploaded_by' => $userId,
+                    'file_path' => $path,
+                    'label' => $file->getClientOriginalName()
+                ]);
+            }
+        }
+
+        ActivityLogger::log(
+            $review->publisher_org_id,
+            'private_message_sent',
+            subjectType: 'ReviewComment',
+            subjectId: $comment->id,
+            metadata: ['review_id' => $review->id, 'recipient_id' => $recipient->id],
+            description: "{$req->user()->name} sent a private message"
+        );
+
+        return response()->json([
+            'id' => $comment->id,
+            'body' => $comment->body,
+            'is_internal' => $comment->is_internal,
+            'parent_id' => $comment->parent_id,
+            'created_at' => $comment->created_at,
+            'updated_at' => $comment->updated_at,
+            'author' => [
+                'id' => $userId,
+                'name' => $req->user()->name,
+                'email' => $req->user()->email,
+                'avatar' => $req->user()->avatar ?? $req->user()->avatar_url,
             ],
             'author_user_id' => $comment->author_user_id,
             'author_org_id' => $comment->author_org_id,
