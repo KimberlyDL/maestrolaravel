@@ -11,16 +11,19 @@ class ReviewCommentController extends Controller
 {
     /**
      * List all comments on a review
+     * FIXED: Added Organization $organization as the first parameter to match the route
      */
-    public function index(ReviewRequest $review)
+    public function index(Request $request, Organization $organization, ReviewRequest $review)
     {
         $this->authorize('view', $review);
 
+        // ... existing logic ...
         $comments = $review->comments()
             ->with(['author:id,name,email,avatar,avatar_url', 'attachments'])
             ->orderBy('created_at', 'asc')
             ->get()
             ->map(function ($comment) {
+                // ... existing map logic ...
                 return [
                     'id' => $comment->id,
                     'body' => $comment->body,

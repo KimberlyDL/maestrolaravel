@@ -7,9 +7,11 @@ use App\Models\{ReviewRequest, ReviewRecipient, Document, DocumentVersion, Organ
 use Illuminate\Http\Request;
 use App\Enums\ReviewStatus;
 use App\Services\ActivityLogger;
+use App\Services\UploadService; // Import this
 
 class ReviewRequestController extends Controller
 {
+    public function __construct(private readonly UploadService $uploads) {}
     /**
      * List reviews (organization-scoped)
      * Added support for approval_status filter
@@ -287,26 +289,56 @@ class ReviewRequestController extends Controller
         return response()->json($review->load(['recipients.reviewer', 'document', 'version']), 201);
     }
 
+    // /**
+    //  * Show review (organization-scoped)
+    //  */
+    // public function show(Organization $organization, ReviewRequest $review)
+    // {
+    //     // Verify review belongs to this organization
+    //     if ($review->publisher_org_id !== $organization->id) {
+    //         return response()->json([
+    //             'message' => 'Review not found in this organization'
+    //         ], 404);
+    //     }
+
+    //     $this->authorize('view', $review);
+
+    //     return $review->load([
+    //         'document',
+    //         'version',
+    //         'publisher',
+    //         'recipients.reviewer',
+    //         'comments.author',
+    //         'attachments'
+    //     ]);
+    // }
+
     /**
      * Show review (organization-scoped)
      */
     public function show(Organization $organization, ReviewRequest $review)
     {
-        // Verify review belongs to this organization
+        // 1. Security: Verify the review actually belongs to the URL's organization
         if ($review->publisher_org_id !== $organization->id) {
+            // If they try to access /org/1/reviews/99 where review 99 belongs to org 2
             return response()->json([
                 'message' => 'Review not found in this organization'
             ], 404);
         }
 
+        // 2. Authorization: Check policies (ReviewRequestPolicy)
+        // Ensure your policy allows 'view' for org members or specific roles
         $this->authorize('view', $review);
 
+        // 3. Eager Load Relations
+        // We load 'recipients.reviewer_org' so the frontend can display the Organization Name if needed
         return $review->load([
             'document',
             'version',
             'publisher',
-            'recipients.reviewer',
-            'comments.author',
+            'recipients.reviewer',     // The User model of the reviewer
+            'recipients.org',  // The Organization model of the reviewer (if applicable)
+            'comments.author',         // For the chat/comments section
             'attachments'
         ]);
     }
@@ -536,6 +568,54 @@ class ReviewRequestController extends Controller
         return response()->json(['message' => 'Review reopened']);
     }
 
+    // /**
+    //  * Attach new version (organization-scoped)
+    //  */
+    // public function attachNewVersion(Request $req, Organization $organization, ReviewRequest $review)
+    // {
+    //     // Verify review belongs to this organization
+    //     if ($review->publisher_org_id !== $organization->id) {
+    //         return response()->json([
+    //             'message' => 'Review not found in this organization'
+    //         ], 404);
+    //     }
+
+    //     $this->authorize('attachVersion', $review);
+
+    //     $data = $req->validate([
+    //         'file' => ['required', 'file', 'max:20480'],
+    //         'note' => ['nullable', 'string', 'max:2000'],
+    //     ]);
+
+    //     $document = $review->document()->with('versions')->first();
+    //     $next = ($document->versions()->max('version_number') ?? 0) + 1;
+    //     $path = $data['file']->store("documents/{$document->id}", 'public');
+
+    //     $ver = $document->versions()->create([
+    //         'version_number' => $next,
+    //         'file_path' => $path,
+    //         'note' => $data['note'] ?? null,
+    //         'uploaded_by' => auth()->id(),
+    //     ]);
+
+    //     $document->update(['latest_version_id' => $ver->id]);
+    //     $review->update(['document_version_id' => $ver->id]);
+
+    //     ActivityLogger::log(
+    //         $organization->id,
+    //         'version_uploaded',
+    //         subjectType: 'DocumentVersion',
+    //         subjectId: $ver->id,
+    //         metadata: ['version' => $ver->version_number, 'review_id' => $review->id],
+    //         description: auth()->user()->name . " uploaded version {$ver->version_number} for review: {$review->subject}"
+    //     );
+
+    //     return response()->json([
+    //         'version' => $ver,
+    //         'version_id' => $ver->id,
+    //     ]);
+    // }
+
     /**
      * Attach new version (organization-scoped)
      */
@@ -557,7 +637,13 @@ class ReviewRequestController extends Controller
 
         $document = $review->document()->with('versions')->first();
         $next = ($document->versions()->max('version_number') ?? 0) + 1;
-        $path = $data['file']->store("documents/{$document->id}", 'public');
+
+        // --- FIX START ---
+        // Use UploadService instead of $file->store(). 
+        // This uses your uniqueName() logic which preserves the original extension.
+        $stored = $this->uploads->storeDocumentVersion($document->id, $data['file']);
+        $path = $stored['path'];
+        // --- FIX END ---
 
         $ver = $document->versions()->create([
             'version_number' => $next,
@@ -662,4 +748,89 @@ class ReviewRequestController extends Controller
 
         return response()->json(['message' => 'Reviewer removed successfully']);
     }
+
+
+
+
+
+
+
+    #region REVIEWER
+    /**
+     * List reviews sent TO the current organization (Reviewer POV)
+     */
+    public function indexIncoming(Request $req, Organization $organization)
+    {
+        $userId = auth()->id();
+        $status = $req->query('status'); // 'pending', 'history'
+        $q = $req->query('q');
+
+        // Query: Reviews where the recipient is ME (User) AND the Org is THIS Org
+        $query = ReviewRequest::query()
+            ->whereHas('recipients', function($q) use ($userId, $organization) {
+                $q->where('reviewer_user_id', $userId)
+                  ->where('reviewer_org_id', $organization->id);
+            })
+            ->with(['publisher', 'document', 'submitter', 'recipients' => function($q) use ($userId) {
+                // Load my specific recipient record so I know my status
+                $q->where('reviewer_user_id', $userId);
+            }]);
+
+        // Filter by My Status (Pending vs History)
+        if ($status === 'pending') {
+            $query->whereHas('recipients', function($q) use ($userId) {
+                $q->where('reviewer_user_id', $userId)
+                  ->where('status', 'pending');
+            });
+        } elseif ($status === 'history') {
+            $query->whereHas('recipients', function($q) use ($userId) {
+                $q->where('reviewer_user_id', $userId)
+                  ->whereIn('status', ['approved', 'declined', 'viewed']);
+            });
+        }
+
+        // Search
+        if ($q) {
+            $query->where(function ($sub) use ($q) {
+                $sub->where('subject', 'like', "%{$q}%")
+                    ->orWhereHas('publisher', fn($p) => $p->where('name', 'like', "%{$q}%"));
+            });
+        }
+
+        return $query->orderByDesc('created_at')->paginate(15);
+    }
+
+    /**
+     * Show a specific incoming review
+     */
+    public function showIncoming(Organization $organization, ReviewRequest $review)
+    {
+        $userId = auth()->id();
+
+        // Security: Check if this review actually has a recipient entry for THIS Org + THIS User
+        $isRecipient = $review->recipients()
+            ->where('reviewer_user_id', $userId)
+            ->where('reviewer_org_id', $organization->id)
+            ->exists();
+
+        if (!$isRecipient) {
+            // This is the key security check: 
+            // Even if I am a member of USG, if this specific review wasn't sent to ME at USG, block it.
+            return response()->json(['message' => 'You are not a recipient of this review in this organization.'], 403);
+        }
+
+        // Load data needed for the workspace
+        return $review->load([
+            'document',
+            'version',
+            'publisher',
+            'submitter',
+            'recipients' => function($q) use ($userId) {
+                 // We specifically need the recipient record for the current user to get the ID for approval/declining
+                $q->where('reviewer_user_id', $userId);
+            },
+            'attachments'
+        ]);
+    }
+    #endregion
 }

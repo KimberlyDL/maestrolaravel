@@ -330,6 +330,40 @@ Route::middleware(['auth:api'])->group(function () {
 
 
 
+        /** =============================================================== */
+        /** ----------------- REVIEWER / INCOMING ROUTES ------------------ */
+        /** =============================================================== */
+
+        // List reviews sent TO this organization (Inbox)
+        Route::get('/incoming-reviews', [ReviewRequestController::class, 'indexIncoming'])
+            ->middleware('org.member'); // Any member of this org can try to access
+
+        // Show a specific incoming review
+        Route::get('/incoming-reviews/{review}', [ReviewRequestController::class, 'showIncoming'])
+            ->middleware('org.member');
+
+        // Actions on incoming reviews (Approve/Decline)
+        // Note: We use the existing ReviewRecipientController but accessed via Org Scope
+        Route::patch('/incoming-reviews/{review}/recipients/{recipient}/view', [ReviewRecipientController::class, 'markViewed'])
+            ->middleware('org.member');
+
+        Route::post('/incoming-reviews/{review}/recipients/{recipient}/approve', [ReviewRecipientController::class, 'approve'])
+            ->middleware('org.member');
+
+        Route::post('/incoming-reviews/{review}/recipients/{recipient}/decline', [ReviewRecipientController::class, 'decline'])
+            ->middleware('org.member');
+
+        // Chat for incoming reviews
+        Route::get('/incoming-reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
+            ->middleware('org.member');
+
+        Route::post('/incoming-reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'storeRecipientComment'])
+            ->middleware('org.member');
+
+
+
+
+
 
         // @FE ReviewUpload
         Route::post('/documents', [DocumentController::class, 'store'])
@@ -377,6 +411,9 @@ Route::middleware(['auth:api'])->group(function () {
             ->middleware('org.permission:manage_reviews');
 
         // Comments and activity
+        Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index'])
+            ->middleware('org.member');
+
         Route::get('/reviews/{review}/recipients/{recipient}/comments', [ReviewCommentController::class, 'recipientComments'])
             ->middleware('org.member');
 
@@ -653,6 +690,8 @@ Route::middleware(['auth:api'])->group(function () {
             '/storage/documents/{document}/versions/{version}/download',
             [DocumentController::class, 'downloadVersion']
         )->middleware('org.permission:view_storage');
+
+
     });
 
     #endregion

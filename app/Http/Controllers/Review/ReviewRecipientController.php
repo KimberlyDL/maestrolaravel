@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Review;
 
 use App\Http\Controllers\Controller;
-use App\Models\{ReviewRequest, ReviewRecipient, ReviewAction};
+use App\Models\{ReviewRequest, ReviewRecipient, Organization};
 use Illuminate\Http\Request;
 use App\Enums\ReviewStatus;
 use App\Services\ActivityLogger;
@@ -79,7 +79,7 @@ class ReviewRecipientController extends Controller
     }
 
     // Reviewer marks "viewed"
-    public function markViewed(ReviewRequest $review, ReviewRecipient $recipient)
+public function markViewed(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
     {
         $this->authorize('actAsRecipient', [$review, $recipient]);
 
@@ -101,7 +101,7 @@ class ReviewRecipientController extends Controller
     }
 
     // Reviewer approves
-    public function approve(ReviewRequest $review, ReviewRecipient $recipient)
+    public function approve(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
     {
         $this->authorize('actAsRecipient', [$review, $recipient]);
 
@@ -116,7 +116,6 @@ class ReviewRecipientController extends Controller
             description: auth()->user()->name . " approved the review"
         );
 
-        // Optional: if all recipients approved, auto-advance review status
         if ($review->recipients()->whereNot('status', 'approved')->exists() === false) {
             $review->update(['status' => ReviewStatus::Approved->value]);
         } else {
@@ -127,7 +126,8 @@ class ReviewRecipientController extends Controller
     }
 
     // Reviewer declines
-    public function decline(ReviewRequest $review, ReviewRecipient $recipient, Request $req)
+    // ADD Organization $organization as the first argument
+    public function decline(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient, Request $req)
     {
         $this->authorize('actAsRecipient', [$review, $recipient]);
 
