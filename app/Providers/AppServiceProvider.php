@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Auth\Notifications\ResetPassword;
+use App\Services\NotificationService;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -14,6 +15,7 @@ class AppServiceProvider extends ServiceProvider
     {
         //
         $this->app->singleton(\App\Services\UploadService::class, fn() => new \App\Services\UploadService());
+        $this->app->singleton(NotificationService::class);
     }
 
     /**

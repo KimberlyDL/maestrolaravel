@@ -8,6 +8,7 @@ use App\Models\DutyAssignment;
 use App\Models\Organization;
 use App\Services\DutyScheduleService;
 use App\Services\ActivityLogger;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -15,7 +16,8 @@ use Carbon\Carbon;
 class DutyScheduleController extends Controller
 {
     public function __construct(
-        private readonly DutyScheduleService $dutyService
+        private readonly DutyScheduleService $dutyService,
+        private readonly NotificationService $notificationService
     ) {}
 
     /**
@@ -202,8 +204,28 @@ class DutyScheduleController extends Controller
             'status' => 'sometimes|in:draft,published,completed,cancelled',
         ]);
 
+        $originalData = $dutySchedule->only(array_keys($data));
+
         $dutySchedule->update($data);
 
+        // Detect what changed
+        $changes = [];
+        foreach ($data as $key => $value) {
+            if ($originalData[$key] != $value) {
+                $changes[$key] = $value;
+            }
+        }
+
+        // Notify if significant changes
+        if (!empty($changes) && $dutySchedule->status !== 'draft') {
+            $this->notificationService->notifyDutyUpdated($dutySchedule, $changes);
+        }
+
+        // Notify if cancelled
+        if (isset($data['status']) && $data['status'] === 'cancelled') {
+            $this->notificationService->notifyDutyCancelled($dutySchedule);
+        }
+        
         // Log activity
         ActivityLogger::log(
             $organization->id,

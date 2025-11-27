@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\DutySwapRequest;
 use App\Models\DutyAssignment;
 use App\Models\Organization;
+use App\Services\NotificationService;
 use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
 
@@ -16,6 +17,13 @@ class DutySwapController extends Controller
      * ?member_view=true - shows swaps relevant to logged-in user
      * ?status=pending - filter by status
      */
+    private NotificationService $notificationService;
+
+    public function __construct()
+    {
+        $this->notificationService = app(NotificationService::class);
+    }
+
     public function index(Request $request, Organization $organization)
     {
         $query = DutySwapRequest::whereHas('dutyAssignment.dutySchedule', function ($q) use ($organization) {
@@ -123,13 +131,16 @@ class DutySwapController extends Controller
             }
         }
 
-        $swapRequest = DutySwapRequest::create([
+       $swapRequest = DutySwapRequest::create([
             'duty_assignment_id' => $dutyAssignment->id,
             'from_officer_id' => auth()->id(),
             'to_officer_id' => $data['to_officer_id'] ?? null,
             'reason' => $data['reason'],
             'status' => 'pending',
         ]);
+
+        // Send notification
+        $this->notificationService->notifySwapRequested($swapRequest);
 
         // Log activity
         ActivityLogger::log(
@@ -191,7 +202,7 @@ class DutySwapController extends Controller
         // Update swap status
         $swapRequest->update([
             'status' => 'accepted',
-            'to_officer_id' => $userId, // Set accepting officer
+            'to_officer_id' => $userId,
             'reviewed_by' => $userId,
             'reviewed_at' => now(),
             'review_notes' => $data['notes'] ?? 'Accepted by member'
@@ -206,6 +217,9 @@ class DutySwapController extends Controller
             'assigned_by' => $userId,
             'notes' => ($assignment->notes ?? '') . "\n[Swapped from " . $swapRequest->fromOfficer->name . "]",
         ]);
+
+        // Send notification
+        $this->notificationService->notifySwapAccepted($swapRequest);
 
         // Log activity
         ActivityLogger::log(
@@ -269,6 +283,9 @@ class DutySwapController extends Controller
             'review_notes' => $data['reason'] ?? 'Declined by member'
         ]);
 
+        // Send notification
+        $this->notificationService->notifySwapDeclined($swapRequest);
+
         // Log activity
         ActivityLogger::log(
             $organization->id,
@@ -316,14 +333,16 @@ class DutySwapController extends Controller
 
         $assignment = $swapRequest->dutyAssignment;
 
-        if ($data['action'] === 'reject') {
-            // Reject: Close the swap request
+         if ($data['action'] === 'reject') {
             $swapRequest->update([
                 'status' => 'rejected',
                 'reviewed_by' => auth()->id(),
                 'reviewed_at' => now(),
                 'review_notes' => $data['review_notes'] ?? 'Rejected by admin',
             ]);
+
+            // Send notification
+            $this->notificationService->notifySwapRejected($swapRequest);
 
             // Log activity
             ActivityLogger::log(
@@ -381,6 +400,9 @@ class DutySwapController extends Controller
                 'Admin approved and reassigned swap from ' . $swapRequest->fromOfficer->name . ' to ' . $swapRequest->toOfficer->name
             );
 
+            // Send notification
+            $this->notificationService->notifySwapApproved($swapRequest);
+
             return response()->json([
                 'message' => 'Swap request approved and duty reassigned successfully',
                 'swap' => $swapRequest->fresh(['reviewer', 'dutyAssignment', 'fromOfficer', 'toOfficer']),
@@ -411,6 +433,9 @@ class DutySwapController extends Controller
                 ],
                 'Admin approved open swap request from ' . $swapRequest->fromOfficer->name
             );
+
+            // Send notification
+            $this->notificationService->notifySwapApproved($swapRequest);
 
             return response()->json([
                 'message' => 'Swap request approved. Members can now accept it.',

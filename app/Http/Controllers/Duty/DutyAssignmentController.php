@@ -7,12 +7,14 @@ use App\Models\DutySchedule;
 use App\Models\DutyAssignment;
 use App\Models\Organization;
 use App\Services\DutyScheduleService;
+use App\Services\NotificationService;
 use Illuminate\Http\Request;
 
 class DutyAssignmentController extends Controller
 {
     public function __construct(
-        private readonly DutyScheduleService $dutyService
+        private readonly DutyScheduleService $dutyService,
+        private readonly NotificationService $notificationService
     ) {}
 
     /**
@@ -67,6 +69,11 @@ class DutyAssignmentController extends Controller
             auth()->id(),
             $data['notes'] ?? null
         );
+
+        // Send notifications to assigned officers
+        foreach ($assignments as $assignment) {
+            $this->notificationService->notifyDutyAssigned($assignment);
+        }
 
         return response()->json($assignments, 201);
     }
@@ -124,6 +131,13 @@ class DutyAssignmentController extends Controller
             'notes' => $data['notes'] ?? $dutyAssignment->notes,
             'confirmed_at' => $data['response'] === 'confirm' ? now() : null,
         ]);
+
+        // Notify admins about response
+        if ($status === 'confirmed') {
+            $this->notificationService->notifyAssignmentConfirmed($dutyAssignment);
+        } else {
+            $this->notificationService->notifyAssignmentDeclined($dutyAssignment);
+        }
 
         return response()->json($dutyAssignment->fresh(['dutySchedule', 'officer']));
     }

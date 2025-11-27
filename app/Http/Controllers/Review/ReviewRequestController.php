@@ -8,10 +8,14 @@ use Illuminate\Http\Request;
 use App\Enums\ReviewStatus;
 use App\Services\ActivityLogger;
 use App\Services\UploadService; // Import this
+use App\Services\NotificationService;
 
 class ReviewRequestController extends Controller
 {
-    public function __construct(private readonly UploadService $uploads) {}
+    public function __construct(
+        private readonly UploadService $uploads,
+    private readonly NotificationService $notifications
+    ) {}
     /**
      * List reviews (organization-scoped)
      * Added support for approval_status filter
@@ -103,6 +107,18 @@ class ReviewRequestController extends Controller
 
         $review->approve(auth()->id());
 
+        // --- START FIX: Notify Submitter ---
+        $this->notifications->send(
+            $review->submitted_by,
+            'Review Approved',
+            "Your review '{$review->subject}' has been approved by the admin.",
+            'review.approved',
+            $review,
+            "/orgs/{$organization->id}/reviews/{$review->id}", // URL to view their review
+            'normal',
+            $organization->id
+        );
+
         ActivityLogger::log(
             $organization->id,
             'review_approved_by_admin',
@@ -142,6 +158,18 @@ class ReviewRequestController extends Controller
         ]);
 
         $review->reject(auth()->id(), $data['reason'] ?? null);
+
+        // --- START FIX: Notify Submitter ---
+        $this->notifications->send(
+            $review->submitted_by,
+            'Review Rejected',
+            "Your review '{$review->subject}' was rejected. Reason: " . ($data['reason'] ?? 'No reason provided'),
+            'review.rejected',
+            $review,
+            "/orgs/{$organization->id}/reviews/{$review->id}",
+            'urgent',
+            $organization->id
+        );
 
         ActivityLogger::log(
             $organization->id,
@@ -272,6 +300,17 @@ class ReviewRequestController extends Controller
                 'status' => 'pending',
                 'due_at' => $r['due_at'] ?? null,
             ]);
+
+            $this->notifications->send(
+                $r['user_id'], // Send to the reviewer
+                'New Review Request', // Title
+                "You have been assigned to review: {$review->subject}", // Message
+                'review.requested', // Type
+                $review, // Linked Object
+                "/incoming-reviews/{$review->id}", // Action URL
+                'high', // Priority
+                $organization->id // Organization Context
+            );
         }
 
         if ($req->hasFile('attachments')) {
@@ -795,8 +834,17 @@ class ReviewRequestController extends Controller
             description: auth()->user()->name . " sent a reminder to {$recipient->reviewer->name}"
         );
 
-        // TODO: Send actual notification/email here
 
+        $this->notifications->send(
+            $recipient->reviewer_user_id,
+            'Review Reminder',
+            "Reminder: You have a pending review for '{$review->subject}'",
+            'review.reminder',
+            $review,
+            "/incoming-reviews/{$review->id}",
+            'high',
+            $organization->id
+        );
         return response()->json(['message' => 'Reminder sent successfully']);
     }
 

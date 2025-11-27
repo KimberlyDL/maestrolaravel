@@ -55,4 +55,12 @@ class Kernel extends HttpKernel
         'jwt.auth' => \Tymon\JWTAuth\Http\Middleware\Authenticate::class,
         'email.verified.api' => \App\Http\Middleware\EnsureEmailIsVerifiedApi::class,
     ];
+
+    protected function schedule(Schedule $schedule): void
+{
+    // Send duty reminders daily at 9 AM
+    $schedule->command('duty:send-reminders')
+        ->dailyAt('09:00')
+        ->timezone('Asia/Manila');
+}
 }

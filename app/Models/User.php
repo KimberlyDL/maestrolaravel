@@ -30,6 +30,7 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         'provider_id',
         'avatar',
         'email_verified_at',
+        'notification_preferences'
     ];
 
     protected $hidden = [
@@ -42,6 +43,7 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'notification_preferences' => 'array',
         ];
     }
 
@@ -73,6 +75,11 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
         if ($this->avatar_path) return asset('storage/' . $this->avatar_path);
         return 'https://ui-avatars.com/api/?name=' . urlencode($this->name) . '&background=random';
     }
+
+    public function notifications()
+{
+    return $this->hasMany(Notification::class);
+}
 
     // ========================================
     // Organization Relationships

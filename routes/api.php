@@ -24,6 +24,7 @@ use App\Http\Controllers\Duty\DutySwapController;
 use App\Http\Controllers\Duty\DutyTemplateController;
 use App\Http\Controllers\DocumentShareController;
 use App\Http\Controllers\StorageController;
+use App\Http\Controllers\NotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -104,6 +105,8 @@ Route::middleware(['auth:api'])->group(function () {
         return app(ReviewCommentController::class)->storeRecipientComment($request, null, $review, $recipient);
     });
 
+    Route::get('/reviews/{review}/comments', [ReviewCommentController::class, 'index']);
+    Route::post('/reviews/{review}/comments', [ReviewCommentController::class, 'store']);
     #endregion
 
     /** =============================================================== */
@@ -133,6 +136,28 @@ Route::middleware(['auth:api'])->group(function () {
         Route::get('/share/stats', [DocumentShareController::class, 'getShareStats']);
         Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs']);
     });
+
+    #endregion
+
+    #region Notification
+    // ===========================================
+    // NOTIFICATION ROUTES
+    // ===========================================
+    
+    // 1. Static/Specific routes MUST come before wildcard routes to avoid conflicts
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
+    Route::post('/notifications/mark-all-read', [NotificationController::class, 'markAllAsRead']);
+    Route::delete('/notifications/delete-all-read', [NotificationController::class, 'deleteAllRead']);
+    Route::get('/notifications/preferences', [NotificationController::class, 'getPreferences']);
+    Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);
+
+    // 2. Resource/Wildcard routes
+    Route::get('/notifications', [NotificationController::class, 'index']);
+    
+    // Using {notification} parameter to match the controller's type hint: markAsRead(Notification $notification)
+    Route::post('/notifications/{notification}/mark-read', [NotificationController::class, 'markAsRead']);
+    Route::post('/notifications/{notification}/mark-unread', [NotificationController::class, 'markAsUnread']);
+    Route::delete('/notifications/{notification}', [NotificationController::class, 'destroy']);
 
     #endregion
 

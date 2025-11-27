@@ -7,9 +7,14 @@ use App\Models\{ReviewRequest, ReviewRecipient, Organization};
 use Illuminate\Http\Request;
 use App\Enums\ReviewStatus;
 use App\Services\ActivityLogger;
+use App\Services\NotificationService;
 
 class ReviewRecipientController extends Controller
 {
+    public function __construct(
+        private readonly NotificationService $notifications
+    ) {}
+    
     public function update(Request $req, ReviewRequest $review, ReviewRecipient $recipient)
     {
         $this->authorize('update', $review);
