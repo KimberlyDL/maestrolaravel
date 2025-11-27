@@ -166,11 +166,11 @@ class DefaultPermissions
                 'manage_document_sharing',
             ],
             'reviews' => [
-                'view_reviews',
                 'create_reviews',
-                'manage_reviews',
-                'assign_reviewers',
-                'comment_on_reviews',
+                // 'view_reviews',
+                // 'manage_reviews',
+                // 'assign_reviewers',
+                // 'comment_on_reviews',
             ],
             'duty' => [
                 'view_duty_schedules',

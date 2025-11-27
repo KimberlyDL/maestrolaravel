@@ -134,35 +134,18 @@ class PermissionSeeder extends Seeder
 
             // Review System
             [
-                'name' => 'view_reviews',
-                'display_name' => 'View Reviews',
-                'description' => 'View review requests in the organization',
-                'category' => 'reviews'
-            ],
-            [
                 'name' => 'create_reviews',
-                'display_name' => 'Create Review Requests',
-                'description' => 'Create new review requests',
+                'display_name' => 'Create & Manage Reviews',
+                'description' => 'Create review requests, edit, close, reopen, and manage recipients',
                 'category' => 'reviews'
             ],
             [
-                'name' => 'manage_reviews',
-                'display_name' => 'Manage Reviews',
-                'description' => 'Edit, close, and reopen review requests',
+                'name' => 'manage_reviews', // For ADMINS ONLY - approve/reject submissions
+                'display_name' => 'Admin: Approve Review Submissions',
+                'description' => 'Approve or reject review submissions (admin workflow)',
                 'category' => 'reviews'
             ],
-            [
-                'name' => 'assign_reviewers',
-                'display_name' => 'Assign Reviewers',
-                'description' => 'Assign reviewers to review requests',
-                'category' => 'reviews'
-            ],
-            [
-                'name' => 'comment_on_reviews',
-                'display_name' => 'Comment on Reviews',
-                'description' => 'Add comments to review requests',
-                'category' => 'reviews'
-            ],
+
 
             // Duty Management
             [

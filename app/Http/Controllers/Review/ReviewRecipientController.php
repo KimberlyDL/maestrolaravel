@@ -78,10 +78,92 @@ class ReviewRecipientController extends Controller
         ]);
     }
 
-    // Reviewer marks "viewed"
-public function markViewed(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
+//     // Reviewer marks "viewed"
+// public function markViewed(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
+//     {
+//         $this->authorize('actAsRecipient', [$review, $recipient]);
+
+//         $recipient->update([
+//             'status' => $recipient->status === 'pending' ? 'viewed' : $recipient->status,
+//             'last_viewed_at' => now()
+//         ]);
+
+//         ActivityLogger::log(
+//             $review->publisher_org_id,
+//             'document_viewed',
+//             subjectType: 'ReviewRecipient',
+//             subjectId: $recipient->id,
+//             metadata: ['review_id' => $review->id],
+//             description: auth()->user()->name . " viewed the document"
+//         );
+
+//         return response()->noContent();
+//     }
+
+//     // Reviewer approves
+//     public function approve(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
+//     {
+//         $this->authorize('actAsRecipient', [$review, $recipient]);
+
+//         $recipient->update(['status' => 'approved']);
+
+//         ActivityLogger::log(
+//             $review->publisher_org_id,
+//             'review_approved',
+//             subjectType: 'ReviewRecipient',
+//             subjectId: $recipient->id,
+//             metadata: ['review_id' => $review->id],
+//             description: auth()->user()->name . " approved the review"
+//         );
+
+//         if ($review->recipients()->whereNot('status', 'approved')->exists() === false) {
+//             $review->update(['status' => ReviewStatus::Approved->value]);
+//         } else {
+//             $review->update(['status' => ReviewStatus::InReview->value]);
+//         }
+
+//         return response()->json(['message' => 'Approved.']);
+//     }
+
+//     // Reviewer declines
+//     // ADD Organization $organization as the first argument
+//     public function decline(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient, Request $req)
+//     {
+//         $this->authorize('actAsRecipient', [$review, $recipient]);
+
+//         $recipient->update(['status' => 'declined']);
+
+//         $reason = $req->input('reason');
+
+//         ActivityLogger::log(
+//             $review->publisher_org_id,
+//             'review_declined',
+//             subjectType: 'ReviewRecipient',
+//             subjectId: $recipient->id,
+//             metadata: ['review_id' => $review->id, 'reason' => $reason],
+//             description: auth()->user()->name . " declined the review" . ($reason ? ": {$reason}" : '')
+//         );
+
+//         $review->update(['status' => ReviewStatus::Declined->value]);
+
+//         return response()->json(['message' => 'Declined.']);
+//     }
+
+
+    /**
+     * Mark as viewed (Simplified - just check if user is the recipient)
+     */
+    public function markViewed(?Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
     {
-        $this->authorize('actAsRecipient', [$review, $recipient]);
+        // Verify recipient belongs to review
+        if ($recipient->review_request_id !== $review->id) {
+            abort(404, 'Recipient not found for this review');
+        }
+
+        // Only the recipient themselves can mark as viewed
+        if ($recipient->reviewer_user_id !== auth()->id()) {
+            abort(403, 'Unauthorized');
+        }
 
         $recipient->update([
             'status' => $recipient->status === 'pending' ? 'viewed' : $recipient->status,
@@ -100,10 +182,20 @@ public function markViewed(Organization $organization, ReviewRequest $review, Re
         return response()->noContent();
     }
 
-    // Reviewer approves
-    public function approve(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
+    /**
+     * Approve review (Simplified)
+     */
+    public function approve(?Organization $organization, ReviewRequest $review, ReviewRecipient $recipient)
     {
-        $this->authorize('actAsRecipient', [$review, $recipient]);
+        // Verify recipient belongs to review
+        if ($recipient->review_request_id !== $review->id) {
+            abort(404, 'Recipient not found for this review');
+        }
+
+        // Only the recipient themselves can approve
+        if ($recipient->reviewer_user_id !== auth()->id()) {
+            abort(403, 'Unauthorized');
+        }
 
         $recipient->update(['status' => 'approved']);
 
@@ -116,24 +208,34 @@ public function markViewed(Organization $organization, ReviewRequest $review, Re
             description: auth()->user()->name . " approved the review"
         );
 
+        // Update overall review status
         if ($review->recipients()->whereNot('status', 'approved')->exists() === false) {
             $review->update(['status' => ReviewStatus::Approved->value]);
         } else {
             $review->update(['status' => ReviewStatus::InReview->value]);
         }
 
-        return response()->json(['message' => 'Approved.']);
+        return response()->json(['message' => 'Review approved successfully']);
     }
 
-    // Reviewer declines
-    // ADD Organization $organization as the first argument
-    public function decline(Organization $organization, ReviewRequest $review, ReviewRecipient $recipient, Request $req)
+    /**
+     * Decline review (Simplified)
+     */
+    public function decline(?Organization $organization, ReviewRequest $review, ReviewRecipient $recipient, Request $req)
     {
-        $this->authorize('actAsRecipient', [$review, $recipient]);
+        // Verify recipient belongs to review
+        if ($recipient->review_request_id !== $review->id) {
+            abort(404, 'Recipient not found for this review');
+        }
 
-        $recipient->update(['status' => 'declined']);
+        // Only the recipient themselves can decline
+        if ($recipient->reviewer_user_id !== auth()->id()) {
+            abort(403, 'Unauthorized');
+        }
 
         $reason = $req->input('reason');
+
+        $recipient->update(['status' => 'declined']);
 
         ActivityLogger::log(
             $review->publisher_org_id,
@@ -146,7 +248,7 @@ public function markViewed(Organization $organization, ReviewRequest $review, Re
 
         $review->update(['status' => ReviewStatus::Declined->value]);
 
-        return response()->json(['message' => 'Declined.']);
+        return response()->json(['message' => 'Review declined successfully']);
     }
 
     // Publisher can send reminder to a specific recipient
