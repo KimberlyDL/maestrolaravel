@@ -173,13 +173,8 @@ class DefaultPermissions
                 // 'comment_on_reviews',
             ],
             'duty' => [
-                'view_duty_schedules',
-                'create_duty_schedules',
-                'edit_duty_schedules',
-                'delete_duty_schedules',
-                'assign_duties',
-                'approve_duty_swaps',
-                'manage_duty_templates',
+                'participate_in_duties',  // For all approved members
+                'manage_duty_system',     // For admins only (by default)
             ],
             'analytics' => [
                 'view_statistics',

@@ -17,9 +17,8 @@ class DutyAssignmentController extends Controller
         private readonly NotificationService $notificationService
     ) {}
 
-    /**
-     * Get current user's assignments
-     */
+    // ... [myAssignments method remains unchanged] ...
+
     public function myAssignments(Request $request, Organization $organization)
     {
         $query = DutyAssignment::whereHas('dutySchedule', function ($q) use ($organization) {
@@ -72,7 +71,16 @@ class DutyAssignmentController extends Controller
 
         // Send notifications to assigned officers
         foreach ($assignments as $assignment) {
-            $this->notificationService->notifyDutyAssigned($assignment);
+            $this->notificationService->send(
+                $assignment->officer_id,
+                'New Duty Assignment',
+                "You have been assigned to '{$dutySchedule->title}' on {$dutySchedule->date}",
+                'duty.assigned',
+                $dutySchedule,
+                "/orgs/{$organization->id}/duties/{$dutySchedule->id}",
+                'high',
+                $organization->id
+            );
         }
 
         return response()->json($assignments, 201);
@@ -106,6 +114,8 @@ class DutyAssignmentController extends Controller
     {
         $this->authorize('manageDutySchedules', $organization);
 
+        // Optional: Notify officer that assignment was removed? 
+        // For now, adhering to existing logic (just delete).
         $dutyAssignment->delete();
 
         return response()->json(['message' => 'Assignment removed']);
@@ -132,19 +142,32 @@ class DutyAssignmentController extends Controller
             'confirmed_at' => $data['response'] === 'confirm' ? now() : null,
         ]);
 
-        // Notify admins about response
-        if ($status === 'confirmed') {
-            $this->notificationService->notifyAssignmentConfirmed($dutyAssignment);
-        } else {
-            $this->notificationService->notifyAssignmentDeclined($dutyAssignment);
+        // Notify Assigner (or Admin) about response
+        // Target: The person who assigned the duty, or the schedule creator
+        $recipientId = $dutyAssignment->assigned_by ?? $dutySchedule->created_by;
+
+        if ($recipientId) {
+            $message = $status === 'confirmed'
+                ? auth()->user()->name . " confirmed attendance for '{$dutySchedule->title}'."
+                : auth()->user()->name . " declined '{$dutySchedule->title}'.";
+
+            $this->notificationService->send(
+                $recipientId,
+                'Duty Response: ' . ucfirst($status),
+                $message,
+                $status === 'confirmed' ? 'duty.confirmed' : 'duty.declined',
+                $dutySchedule,
+                "/orgs/{$organization->id}/duties/{$dutySchedule->id}",
+                'normal',
+                $organization->id
+            );
         }
 
         return response()->json($dutyAssignment->fresh(['dutySchedule', 'officer']));
     }
 
-    /**
-     * Check in for duty
-     */
+    // ... [checkIn and checkOut methods remain unchanged] ...
+
     public function checkIn(Organization $organization, DutySchedule $dutySchedule, DutyAssignment $dutyAssignment)
     {
         if ($dutyAssignment->officer_id !== auth()->id()) {
@@ -166,9 +189,6 @@ class DutyAssignmentController extends Controller
         return response()->json($dutyAssignment->fresh(['dutySchedule', 'officer']));
     }
 
-    /**
-     * Check out from duty
-     */
     public function checkOut(Organization $organization, DutySchedule $dutySchedule, DutyAssignment $dutyAssignment)
     {
         if ($dutyAssignment->officer_id !== auth()->id()) {

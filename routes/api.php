@@ -143,7 +143,7 @@ Route::middleware(['auth:api'])->group(function () {
     // ===========================================
     // NOTIFICATION ROUTES
     // ===========================================
-    
+
     // 1. Static/Specific routes MUST come before wildcard routes to avoid conflicts
     Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
     Route::post('/notifications/mark-all-read', [NotificationController::class, 'markAllAsRead']);
@@ -153,7 +153,7 @@ Route::middleware(['auth:api'])->group(function () {
 
     // 2. Resource/Wildcard routes
     Route::get('/notifications', [NotificationController::class, 'index']);
-    
+
     // Using {notification} parameter to match the controller's type hint: markAsRead(Notification $notification)
     Route::post('/notifications/{notification}/mark-read', [NotificationController::class, 'markAsRead']);
     Route::post('/notifications/{notification}/mark-unread', [NotificationController::class, 'markAsUnread']);
@@ -359,66 +359,152 @@ Route::middleware(['auth:api'])->group(function () {
 
         #region Duty
 
-        // My assignments (any member)
-        Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments']);
+        // My assignments (any member with permission)
+        Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments'])
+            ->middleware('org.permission:participate_in_duties');
 
-        // Duty Schedules
-        Route::get('/duty-schedules', [DutyScheduleController::class, 'index'])
-            ->middleware('org.permission:view_duty_schedules');
-        Route::post('/duty-schedules', [DutyScheduleController::class, 'store'])
-            ->middleware('org.permission:create_duty_schedules');
-        Route::get('/duty-schedules/calendar', [DutyScheduleController::class, 'calendar'])
-            ->middleware('org.permission:view_duty_schedules');
-        Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics'])
-            ->middleware('org.permission:view_statistics');
-        Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics']);
-        Route::get('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'show'])
-            ->middleware('org.permission:view_duty_schedules');
-        Route::patch('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'update'])
-            ->middleware('org.permission:edit_duty_schedules');
-        Route::delete('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'destroy'])
-            ->middleware('org.permission:delete_duty_schedules');
-        Route::post('/duty-schedules/{dutySchedule}/duplicate', [DutyScheduleController::class, 'duplicate'])
-            ->middleware('org.permission:create_duty_schedules');
+        // Member self-service (respond, check in/out)
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/respond', [DutyAssignmentController::class, 'respond'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-in', [DutyAssignmentController::class, 'checkIn'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-out', [DutyAssignmentController::class, 'checkOut'])
+            ->middleware('org.permission:participate_in_duties');
 
-        // Assignments
-        Route::post('/duty-schedules/{dutySchedule}/assignments', [DutyAssignmentController::class, 'store'])
-            ->middleware('org.permission:assign_duties');
-        Route::patch('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'update'])
-            ->middleware('org.permission:assign_duties');
-        Route::delete('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'destroy'])
-            ->middleware('org.permission:assign_duties');
+        // Availability (any member with permission)
+        Route::get('/duty-availability', [DutyAvailabilityController::class, 'index'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-availability', [DutyAvailabilityController::class, 'store'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::patch('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'update'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::delete('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'destroy'])
+            ->middleware('org.permission:participate_in_duties');
 
-        // Member self-service (any member)
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/respond', [DutyAssignmentController::class, 'respond']);
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-in', [DutyAssignmentController::class, 'checkIn']);
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-out', [DutyAssignmentController::class, 'checkOut']);
-
-        // Availability (any member)
-        Route::get('/duty-availability', [DutyAvailabilityController::class, 'index']);
-        Route::post('/duty-availability', [DutyAvailabilityController::class, 'store']);
-        Route::patch('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'update']);
-        Route::delete('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'destroy']);
-
-        // Swap Requests
+        // Swap Requests - Member actions
         Route::get('/duty-swaps', [DutySwapController::class, 'index'])
-            ->middleware('org.permission:view_duty_schedules');
-        Route::post('/duty-assignments/{dutyAssignment}/swap', [DutySwapController::class, 'store']);
-        Route::post('/duty-swaps/{swapRequest}/accept', [DutySwapController::class, 'accept']);
-        Route::post('/duty-swaps/{swapRequest}/decline', [DutySwapController::class, 'decline']);
-        Route::post('/duty-swaps/{swapRequest}/cancel', [DutySwapController::class, 'cancel']);
-        Route::post('/duty-swaps/{swapRequest}/review', [DutySwapController::class, 'review'])
-            ->middleware('org.permission:approve_duty_swaps');
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-assignments/{dutyAssignment}/swap', [DutySwapController::class, 'store'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-swaps/{swapRequest}/accept', [DutySwapController::class, 'accept'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-swaps/{swapRequest}/decline', [DutySwapController::class, 'decline'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-swaps/{swapRequest}/cancel', [DutySwapController::class, 'cancel'])
+            ->middleware('org.permission:participate_in_duties');
 
-        // Templates
+        // Member statistics
+        Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics'])
+            ->middleware('org.permission:participate_in_duties');
+
+        // === ADMIN ACTIONS (manage_duty_system permission) ===
+
+        // View schedules (read-only for participants, full access for admins)
+        Route::get('/duty-schedules', [DutyScheduleController::class, 'index'])
+            ->middleware('org.permission:participate_in_duties'); // Can view
+        Route::get('/duty-schedules/calendar', [DutyScheduleController::class, 'calendar'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::get('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'show'])
+            ->middleware('org.permission:participate_in_duties');
+
+        // Manage schedules (admin only)
+        Route::post('/duty-schedules', [DutyScheduleController::class, 'store'])
+            ->middleware('org.permission:manage_duty_system');
+        Route::patch('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'update'])
+            ->middleware('org.permission:manage_duty_system');
+        Route::delete('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'destroy'])
+            ->middleware('org.permission:manage_duty_system');
+        Route::post('/duty-schedules/{dutySchedule}/duplicate', [DutyScheduleController::class, 'duplicate'])
+            ->middleware('org.permission:manage_duty_system');
+
+        // Manage assignments (admin only)
+        Route::post('/duty-schedules/{dutySchedule}/assignments', [DutyAssignmentController::class, 'store'])
+            ->middleware('org.permission:manage_duty_system');
+        Route::patch('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'update'])
+            ->middleware('org.permission:manage_duty_system');
+        Route::delete('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'destroy'])
+            ->middleware('org.permission:manage_duty_system');
+
+        // Admin swap review (with reassignment capability)
+        Route::post('/duty-swaps/{swapRequest}/review', [DutySwapController::class, 'adminReview'])
+            ->middleware('org.permission:manage_duty_system');
+
+        // Statistics & Audit Logs (admin only)
+        Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics'])
+            ->middleware('org.permission:manage_duty_system');
+        Route::get('/duty-audit-logs', [DutyScheduleController::class, 'auditLogs'])
+            ->middleware('org.permission:manage_duty_system');
+
+        // Templates (admin only)
         Route::get('/duty-templates', [DutyTemplateController::class, 'index'])
-            ->middleware('org.permission:view_duty_schedules');
+            ->middleware('org.permission:manage_duty_system');
         Route::post('/duty-templates', [DutyTemplateController::class, 'store'])
-            ->middleware('org.permission:manage_duty_templates');
+            ->middleware('org.permission:manage_duty_system');
         Route::patch('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'update'])
-            ->middleware('org.permission:manage_duty_templates');
+            ->middleware('org.permission:manage_duty_system');
         Route::delete('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'destroy'])
-            ->middleware('org.permission:manage_duty_templates');
+            ->middleware('org.permission:manage_duty_system');
+
+        // // My assignments (any member)
+        // Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments']);
+
+        // // Duty Schedules
+        // Route::get('/duty-schedules', [DutyScheduleController::class, 'index'])
+        //     ->middleware('org.permission:view_duty_schedules');
+        // Route::post('/duty-schedules', [DutyScheduleController::class, 'store'])
+        //     ->middleware('org.permission:create_duty_schedules');
+        // Route::get('/duty-schedules/calendar', [DutyScheduleController::class, 'calendar'])
+        //     ->middleware('org.permission:view_duty_schedules');
+        // Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics'])
+        //     ->middleware('org.permission:view_statistics');
+        // Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics']);
+        // Route::get('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'show'])
+        //     ->middleware('org.permission:view_duty_schedules');
+        // Route::patch('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'update'])
+        //     ->middleware('org.permission:edit_duty_schedules');
+        // Route::delete('/duty-schedules/{dutySchedule}', [DutyScheduleController::class, 'destroy'])
+        //     ->middleware('org.permission:delete_duty_schedules');
+        // Route::post('/duty-schedules/{dutySchedule}/duplicate', [DutyScheduleController::class, 'duplicate'])
+        //     ->middleware('org.permission:create_duty_schedules');
+
+        // // Assignments
+        // Route::post('/duty-schedules/{dutySchedule}/assignments', [DutyAssignmentController::class, 'store'])
+        //     ->middleware('org.permission:assign_duties');
+        // Route::patch('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'update'])
+        //     ->middleware('org.permission:assign_duties');
+        // Route::delete('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}', [DutyAssignmentController::class, 'destroy'])
+        //     ->middleware('org.permission:assign_duties');
+
+        // // Member self-service (any member)
+        // Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/respond', [DutyAssignmentController::class, 'respond']);
+        // Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-in', [DutyAssignmentController::class, 'checkIn']);
+        // Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-out', [DutyAssignmentController::class, 'checkOut']);
+
+        // // Availability (any member)
+        // Route::get('/duty-availability', [DutyAvailabilityController::class, 'index']);
+        // Route::post('/duty-availability', [DutyAvailabilityController::class, 'store']);
+        // Route::patch('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'update']);
+        // Route::delete('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'destroy']);
+
+        // // Swap Requests
+        // Route::get('/duty-swaps', [DutySwapController::class, 'index'])
+        //     ->middleware('org.permission:view_duty_schedules');
+        // Route::post('/duty-assignments/{dutyAssignment}/swap', [DutySwapController::class, 'store']);
+        // Route::post('/duty-swaps/{swapRequest}/accept', [DutySwapController::class, 'accept']);
+        // Route::post('/duty-swaps/{swapRequest}/decline', [DutySwapController::class, 'decline']);
+        // Route::post('/duty-swaps/{swapRequest}/cancel', [DutySwapController::class, 'cancel']);
+        // Route::post('/duty-swaps/{swapRequest}/review', [DutySwapController::class, 'review'])
+        //     ->middleware('org.permission:approve_duty_swaps');
+
+        // // Templates
+        // Route::get('/duty-templates', [DutyTemplateController::class, 'index'])
+        //     ->middleware('org.permission:view_duty_schedules');
+        // Route::post('/duty-templates', [DutyTemplateController::class, 'store'])
+        //     ->middleware('org.permission:manage_duty_templates');
+        // Route::patch('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'update'])
+        //     ->middleware('org.permission:manage_duty_templates');
+        // Route::delete('/duty-templates/{dutyTemplate}', [DutyTemplateController::class, 'destroy'])
+        //     ->middleware('org.permission:manage_duty_templates');
 
         #endregion
 
@@ -427,6 +513,34 @@ Route::middleware(['auth:api'])->group(function () {
         /** =============================================================== */
 
         #region Storage
+
+
+
+
+        #region New Version
+        // Storage Document Sharing (within org context)
+        Route::prefix('storage/documents/{document}')->group(function () {
+            // Get share configuration
+            Route::get('/share', [DocumentShareController::class, 'getShare'])
+                ->middleware('org.permission:view_storage');
+
+            // Update share settings (create or update)
+            Route::patch('/share', [DocumentShareController::class, 'updateShare'])
+                ->middleware('org.permission:manage_document_sharing');
+
+            // Revoke share link
+            Route::post('/share/revoke', [DocumentShareController::class, 'revokeShare'])
+                ->middleware('org.permission:manage_document_sharing');
+
+            // Get share statistics
+            Route::get('/share/stats', [DocumentShareController::class, 'getShareStats'])
+                ->middleware('org.permission:view_statistics');
+
+            // Get access logs
+            Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs'])
+                ->middleware('org.permission:view_activity_logs');
+        });
+        #endregion
 
         // Storage Access (Index, Stats)
         Route::get('/storage', [StorageController::class, 'index'])
@@ -492,6 +606,33 @@ Route::middleware(['auth:api'])->group(function () {
     #endregion
 
     /** =============================================================== */
+    /** ------------------ Public Document Sharing ------------------- */
+    /** =============================================================== */
+
+    Route::prefix('share')->group(function () {
+        // Get shared document metadata
+        Route::get('/{token}', [DocumentShareController::class, 'getPublicDocument'])
+            ->name('documents.public-access');
+
+        // Get temporary download URL (RECOMMENDED)
+        Route::get('/{token}/download-url', [DocumentShareController::class, 'getPublicDownloadUrl'])
+            ->name('documents.public-download-url');
+
+        // Secure download endpoint for local storage (fallback)
+        Route::get('/{token}/secure/{downloadToken}', [DocumentShareController::class, 'securePublicDownload'])
+            ->name('documents.public-secure-download');
+
+        // Legacy direct download (keep for backward compatibility)
+        Route::get('/{token}/download', [DocumentShareController::class, 'downloadPublicDocument'])
+            ->name('documents.public-download');
+    });
+    Route::get('/shared-documents', function (Request $request) {
+        // List all public documents + documents shared with user's orgs
+        return app(StorageController::class)->publicIndex($request);
+    });
+
+
+    /** =============================================================== */
     /** ======================== Me Endpoints ========================= */
     /** =============================================================== */
 
@@ -508,28 +649,6 @@ Route::middleware(['auth:api'])->group(function () {
 | Public Routes (No Authentication Required)
 |--------------------------------------------------------------------------
 */
-
-/** =============================================================== */
-/** ------------------ Public Document Sharing ------------------- */
-/** =============================================================== */
-
-Route::prefix('share')->group(function () {
-    // Get shared document metadata
-    Route::get('/{token}', [DocumentShareController::class, 'getPublicDocument'])
-        ->name('documents.public-access');
-
-    // Get temporary download URL (RECOMMENDED)
-    Route::get('/{token}/download-url', [DocumentShareController::class, 'getPublicDownloadUrl'])
-        ->name('documents.public-download-url');
-
-    // Secure download endpoint for local storage (fallback)
-    Route::get('/{token}/secure/{downloadToken}', [DocumentShareController::class, 'securePublicDownload'])
-        ->name('documents.public-secure-download');
-
-    // Legacy direct download (keep for backward compatibility)
-    Route::get('/{token}/download', [DocumentShareController::class, 'downloadPublicDocument'])
-        ->name('documents.public-download');
-});
 
 /** =============================================================== */
 /** ----------------------- Auth Endpoints ----------------------- */

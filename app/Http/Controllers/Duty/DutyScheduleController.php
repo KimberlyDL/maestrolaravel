@@ -10,7 +10,6 @@ use App\Services\DutyScheduleService;
 use App\Services\ActivityLogger;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class DutyScheduleController extends Controller
@@ -20,9 +19,8 @@ class DutyScheduleController extends Controller
         private readonly NotificationService $notificationService
     ) {}
 
-    /**
-     * Get all duty schedules for organization (LIST VIEW)
-     */
+    // ... [index, calendar, show methods remain unchanged] ...
+
     public function index(Request $request, Organization $organization)
     {
         $this->authorize('viewDutySchedules', $organization);
@@ -67,9 +65,6 @@ class DutyScheduleController extends Controller
         return response()->json($schedules);
     }
 
-    /**
-     * Get calendar view of duty schedules (CALENDAR VIEW - FIXED)
-     */
     public function calendar(Request $request, Organization $organization)
     {
         $this->authorize('viewDutySchedules', $organization);
@@ -119,9 +114,6 @@ class DutyScheduleController extends Controller
         return response()->json($events);
     }
 
-    /**
-     * Get single duty schedule details
-     */
     public function show(Request $request, Organization $organization, DutySchedule $dutySchedule)
     {
         $this->authorize('viewDutySchedules', $organization);
@@ -141,7 +133,7 @@ class DutyScheduleController extends Controller
     }
 
     /**
-     * Create duty schedule (with activity logging)
+     * Create duty schedule (with activity logging AND Notifications)
      */
     public function store(Request $request, Organization $organization)
     {
@@ -166,6 +158,9 @@ class DutyScheduleController extends Controller
 
         $schedule = $this->dutyService->createSchedule($organization->id, $data, auth()->id());
 
+        // Reload to get assignments
+        $schedule->load(['assignments.officer']);
+
         // Log activity
         ActivityLogger::log(
             $organization->id,
@@ -179,6 +174,22 @@ class DutyScheduleController extends Controller
             ],
             auth()->user()->name . ' created duty schedule: ' . $schedule->title
         );
+
+        // --- NEW: Notify Assigned Officers ---
+        if ($schedule->status === 'published' && $schedule->assignments->isNotEmpty()) {
+            foreach ($schedule->assignments as $assignment) {
+                $this->notificationService->send(
+                    $assignment->officer_id,
+                    'New Duty Assignment',
+                    "You have been assigned to '{$schedule->title}' on {$schedule->date}",
+                    'duty.assigned',
+                    $schedule,
+                    "/orgs/{$organization->id}/duties/{$schedule->id}",
+                    'high',
+                    $organization->id
+                );
+            }
+        }
 
         return response()->json($schedule->load([
             'assignments.officer:id,name,email,avatar,avatar_url',
@@ -218,14 +229,21 @@ class DutyScheduleController extends Controller
 
         // Notify if significant changes
         if (!empty($changes) && $dutySchedule->status !== 'draft') {
-            $this->notificationService->notifyDutyUpdated($dutySchedule, $changes);
+            // Get all assigned officers
+            foreach ($dutySchedule->assignments as $assignment) {
+                $this->notificationService->send(
+                    $assignment->officer_id,
+                    'Duty Updated',
+                    "The duty '{$dutySchedule->title}' has been updated.",
+                    'duty.updated',
+                    $dutySchedule,
+                    "/orgs/{$organization->id}/duties/{$dutySchedule->id}",
+                    'normal',
+                    $organization->id
+                );
+            }
         }
 
-        // Notify if cancelled
-        if (isset($data['status']) && $data['status'] === 'cancelled') {
-            $this->notificationService->notifyDutyCancelled($dutySchedule);
-        }
-        
         // Log activity
         ActivityLogger::log(
             $organization->id,
@@ -242,9 +260,8 @@ class DutyScheduleController extends Controller
         ]));
     }
 
-    /**
-     * Delete duty schedule
-     */
+    // ... [destroy, duplicate, memberStatistics, statistics methods remain unchanged] ...
+
     public function destroy(Organization $organization, DutySchedule $dutySchedule)
     {
         $this->authorize('manageDutySchedules', $organization);
@@ -265,9 +282,6 @@ class DutyScheduleController extends Controller
         return response()->json(['message' => 'Duty schedule deleted successfully']);
     }
 
-    /**
-     * Duplicate duty schedule
-     */
     public function duplicate(Request $request, Organization $organization, DutySchedule $dutySchedule)
     {
         $this->authorize('manageDutySchedules', $organization);
@@ -316,9 +330,6 @@ class DutyScheduleController extends Controller
         ]), 201);
     }
 
-    /**
-     * Get member's personal duty statistics
-     */
     public function memberStatistics(Request $request, Organization $organization)
     {
         $this->authorize('viewDutySchedules', $organization);
@@ -419,9 +430,6 @@ class DutyScheduleController extends Controller
         ]);
     }
 
-    /**
-     * Get duty statistics (enhanced with time series data)
-     */
     public function statistics(Request $request, Organization $organization)
     {
         $this->authorize('viewDutySchedules', $organization);
