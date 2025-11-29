@@ -33,7 +33,7 @@ class Document extends Model
         'published_at' => 'datetime',
     ];
 
-    protected $appends = ['can_edit', 'can_delete'];
+    protected $appends = ['can_edit', 'can_delete', 'can_share'];
 
     /* ==================== Relationships ==================== */
 
@@ -84,25 +84,16 @@ class Document extends Model
 
     /* ==================== Scopes ==================== */
 
-    /**
-     * Scope for review context documents
-     */
     public function scopeForReview(Builder $query): Builder
     {
         return $query->where('context', 'review');
     }
 
-    /**
-     * Scope for storage context documents
-     */
     public function scopeForStorage(Builder $query): Builder
     {
         return $query->where('context', 'storage');
     }
 
-    /**
-     * Scope for publicly accessible documents
-     */
     public function scopePublic(Builder $query): Builder
     {
         return $query->where('visibility', 'public')
@@ -110,9 +101,6 @@ class Document extends Model
             ->where('published_at', '<=', now());
     }
 
-    /**
-     * Scope for organization-accessible documents
-     */
     public function scopeOrgAccessible(Builder $query, int $orgId): Builder
     {
         return $query->where(function ($q) use ($orgId) {
@@ -124,33 +112,21 @@ class Document extends Model
         });
     }
 
-    /**
-     * Scope for files only (not folders)
-     */
     public function scopeFilesOnly(Builder $query): Builder
     {
         return $query->where('is_folder', false);
     }
 
-    /**
-     * Scope for folders only
-     */
     public function scopeFoldersOnly(Builder $query): Builder
     {
         return $query->where('is_folder', true);
     }
 
-    /**
-     * Scope for root level items (no parent)
-     */
     public function scopeRootLevel(Builder $query): Builder
     {
         return $query->whereNull('parent_id');
     }
 
-    /**
-     * Scope for items in a specific folder
-     */
     public function scopeInFolder(Builder $query, ?int $folderId): Builder
     {
         if ($folderId) {
@@ -161,9 +137,6 @@ class Document extends Model
 
     /* ==================== Helper Methods ==================== */
 
-    /**
-     * Check if document is publicly accessible
-     */
     public function isPublic(): bool
     {
         return $this->visibility === 'public'
@@ -173,6 +146,7 @@ class Document extends Model
 
     /**
      * Check if user can edit this document
+     * Only uploader or org admin can edit
      */
     public function canEdit(?int $userId = null): bool
     {
@@ -185,31 +159,63 @@ class Document extends Model
         }
 
         // Org admins can edit
-        $userRole = $this->organization->getUserRole($userId);
+        $org = $this->organization;
+        if (!$org) return false;
+
+        $userRole = $org->getUserRole($userId);
         return in_array($userRole, ['admin', 'owner']);
     }
 
     /**
      * Check if user can delete this document
+     * Uploader OR admin with delete_documents permission
      */
     public function canDelete(?int $userId = null): bool
     {
         $userId = $userId ?? auth()->id();
         if (!$userId) return false;
 
-        // Creator can delete their own uploads
+        // Uploader can delete their own uploads
         if ($this->uploaded_by === $userId) {
             return true;
         }
 
-        // Org admins can delete
-        $userRole = $this->organization->getUserRole($userId);
-        return in_array($userRole, ['admin', 'owner']);
+        // Check admin permission
+        $org = $this->organization;
+        if (!$org) return false;
+
+        $userRole = $org->getUserRole($userId);
+        if (in_array($userRole, ['admin', 'owner'])) {
+            return true;
+        }
+
+        // Check explicit admin delete permission
+        $user = \App\Models\User::find($userId);
+        return $user && $user->hasPermission($this->organization_id, 'admin_delete_documents');
     }
 
     /**
-     * Get formatted file size
+     * Check if user can share this document
+     * Only uploader can share (unless admin)
      */
+    public function canShare(?int $userId = null): bool
+    {
+        $userId = $userId ?? auth()->id();
+        if (!$userId) return false;
+
+        // Uploader can share
+        if ($this->uploaded_by === $userId) {
+            return true;
+        }
+
+        // Org admins can share
+        $org = $this->organization;
+        if (!$org) return false;
+
+        $userRole = $org->getUserRole($userId);
+        return in_array($userRole, ['admin', 'owner']);
+    }
+
     public function getFormattedSizeAttribute(): string
     {
         if (!$this->file_size) return '—';
@@ -224,25 +230,21 @@ class Document extends Model
         return round($bytes, 2) . ' ' . $units[$i];
     }
 
-    /**
-     * Append can_edit attribute
-     */
     public function getCanEditAttribute(): bool
     {
         return $this->canEdit();
     }
 
-    /**
-     * Append can_delete attribute
-     */
     public function getCanDeleteAttribute(): bool
     {
         return $this->canDelete();
     }
 
-    /**
-     * Get breadcrumb path for nested folders
-     */
+    public function getCanShareAttribute(): bool
+    {
+        return $this->canShare();
+    }
+
     public function getBreadcrumbs(): array
     {
         $breadcrumbs = [];
@@ -258,5 +260,36 @@ class Document extends Model
         }
 
         return $breadcrumbs;
+    }
+
+    /**
+     * Get file extension from mime_type or file_path
+     */
+    public function getFileExtension(): ?string
+    {
+        if ($this->is_folder) return null;
+
+        // Try from latest version
+        if ($this->latestVersion && $this->latestVersion->file_path) {
+            return strtoupper(pathinfo($this->latestVersion->file_path, PATHINFO_EXTENSION));
+        }
+
+        // Fallback to mime type
+        if ($this->mime_type) {
+            $mimeMap = [
+                'application/pdf' => 'PDF',
+                'application/msword' => 'DOC',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'DOCX',
+                'application/vnd.ms-excel' => 'XLS',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'XLSX',
+                'image/jpeg' => 'JPG',
+                'image/png' => 'PNG',
+                'text/plain' => 'TXT',
+            ];
+
+            return $mimeMap[$this->mime_type] ?? 'FILE';
+        }
+
+        return 'FILE';
     }
 }

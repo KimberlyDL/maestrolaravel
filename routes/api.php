@@ -128,6 +128,11 @@ Route::middleware(['auth:api'])->group(function () {
     Route::get('/documents/{document}/versions/{version}/secure/{token}', [DocumentController::class, 'secureDownload'])
         ->name('documents.secure-download');
 
+    #endregion
+
+    #region Global Share
+    Route::get('/shared-documents', [DocumentShareController::class, 'getAllSharedDocuments']);
+
     // Document sharing (review context)
     Route::prefix('documents/{document}')->group(function () {
         Route::get('/share', [DocumentShareController::class, 'getShare']);
@@ -136,7 +141,6 @@ Route::middleware(['auth:api'])->group(function () {
         Route::get('/share/stats', [DocumentShareController::class, 'getShareStats']);
         Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs']);
     });
-
     #endregion
 
     #region Notification
@@ -517,31 +521,6 @@ Route::middleware(['auth:api'])->group(function () {
 
 
 
-        #region New Version
-        // Storage Document Sharing (within org context)
-        Route::prefix('storage/documents/{document}')->group(function () {
-            // Get share configuration
-            Route::get('/share', [DocumentShareController::class, 'getShare'])
-                ->middleware('org.permission:view_storage');
-
-            // Update share settings (create or update)
-            Route::patch('/share', [DocumentShareController::class, 'updateShare'])
-                ->middleware('org.permission:manage_document_sharing');
-
-            // Revoke share link
-            Route::post('/share/revoke', [DocumentShareController::class, 'revokeShare'])
-                ->middleware('org.permission:manage_document_sharing');
-
-            // Get share statistics
-            Route::get('/share/stats', [DocumentShareController::class, 'getShareStats'])
-                ->middleware('org.permission:view_statistics');
-
-            // Get access logs
-            Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs'])
-                ->middleware('org.permission:view_activity_logs');
-        });
-        #endregion
-
         // Storage Access (Index, Stats)
         Route::get('/storage', [StorageController::class, 'index'])
             ->middleware('org.permission:view_storage');
@@ -561,20 +540,80 @@ Route::middleware(['auth:api'])->group(function () {
             ->middleware('org.permission:upload_documents');
         Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
             ->middleware('org.permission:delete_documents');
-        Route::post('/storage/documents/{document}/move', [StorageController::class, 'move'])
-            ->middleware('org.permission:upload_documents');
-        Route::post('/storage/documents/{document}/copy', [StorageController::class, 'copy'])
-            ->middleware('org.permission:upload_documents');
 
-        // Storage Document Versions
-        Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
-            ->middleware('org.permission:upload_documents');
-        Route::get('/storage/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion'])
+        // SIMPLIFIED SHARING - Just toggle public/org
+        Route::post('/storage/documents/{document}/toggle-share', [DocumentShareController::class, 'toggleShare'])
+            ->middleware('org.permission:upload_documents'); // Uploader can share
+        Route::get('/storage/documents/{document}/share-status', [DocumentShareController::class, 'getShareStatus'])
             ->middleware('org.permission:view_storage');
+
+        // Storage Document Versions (Download)
         Route::get('/storage/documents/{document}/versions/{version}/download-url', [DocumentController::class, 'getDownloadUrl'])
             ->middleware('org.permission:view_storage');
-        Route::get('/storage/documents/{document}/versions/{version}/secure/{token}', [DocumentController::class, 'secureDownload'])
-            ->middleware('org.permission:view_storage');
+        Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
+            ->middleware('org.permission:upload_documents');
+            
+
+        #region New Version
+
+
+        // // Storage Document Sharing (within org context)
+        // Route::prefix('storage/documents/{document}')->group(function () {
+        //     // Get share configuration
+        //     Route::get('/share', [DocumentShareController::class, 'getShare'])
+        //         ->middleware('org.permission:view_storage');
+
+        //     // Update share settings (create or update)
+        //     Route::patch('/share', [DocumentShareController::class, 'updateShare'])
+        //         ->middleware('org.permission:manage_document_sharing');
+
+        //     // Revoke share link
+        //     Route::post('/share/revoke', [DocumentShareController::class, 'revokeShare'])
+        //         ->middleware('org.permission:manage_document_sharing');
+
+        //     // Get share statistics
+        //     Route::get('/share/stats', [DocumentShareController::class, 'getShareStats'])
+        //         ->middleware('org.permission:view_statistics');
+
+        //     // Get access logs
+        //     Route::get('/share/logs', [DocumentShareController::class, 'getAccessLogs'])
+        //         ->middleware('org.permission:view_activity_logs');
+        // });
+        #endregion
+
+        // // Storage Access (Index, Stats)
+        // Route::get('/storage', [StorageController::class, 'index'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::get('/storage/statistics', [StorageController::class, 'statistics'])
+        //     ->middleware('org.permission:view_statistics');
+
+        // // Storage Management (Create, Upload)
+        // Route::post('/storage/folders', [StorageController::class, 'createFolder'])
+        //     ->middleware('org.permission:create_folders');
+        // Route::post('/storage/upload', [StorageController::class, 'upload'])
+        //     ->middleware('org.permission:upload_documents');
+
+        // // Single Document Operations
+        // Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
+        //     ->middleware('org.permission:upload_documents');
+        // Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
+        //     ->middleware('org.permission:delete_documents');
+        // Route::post('/storage/documents/{document}/move', [StorageController::class, 'move'])
+        //     ->middleware('org.permission:upload_documents');
+        // Route::post('/storage/documents/{document}/copy', [StorageController::class, 'copy'])
+        //     ->middleware('org.permission:upload_documents');
+
+        // // Storage Document Versions
+        // Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
+        //     ->middleware('org.permission:upload_documents');
+        // Route::get('/storage/documents/{document}/versions/{version}/download', [DocumentController::class, 'downloadVersion'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::get('/storage/documents/{document}/versions/{version}/download-url', [DocumentController::class, 'getDownloadUrl'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::get('/storage/documents/{document}/versions/{version}/secure/{token}', [DocumentController::class, 'secureDownload'])
+        //     ->middleware('org.permission:view_storage');
 
         #endregion
     });

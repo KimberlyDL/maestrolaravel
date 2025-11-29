@@ -24,38 +24,35 @@ class StorageController extends Controller
         $orgId = $request->input('organization_id');
         $folderId = $request->input('folder_id');
         $search = $request->input('q');
-        $type = $request->input('type'); // 'all', 'folders', 'files'
+        $type = $request->input('type');
 
         if (!$orgId) {
             return response()->json(['message' => 'organization_id required'], 400);
         }
 
-        // FIX: Pass as array with Document class and orgId
         $this->authorize('viewStorage', [Document::class, $orgId]);
 
         $query = Document::forStorage()
             ->where('organization_id', $orgId)
             ->with([
                 'uploader:id,name,email,avatar,avatar_url',
-                'latestVersion:id,document_id,version_number,created_at',
-                'parent:id,title'
+                'latestVersion:id,document_id,version_number,created_at,file_path',
+                'parent:id,title',
+                'organization:id,name'
             ]);
 
-        // Filter by folder
         if ($folderId) {
             $query->where('parent_id', $folderId);
         } else {
             $query->rootLevel();
         }
 
-        // Filter by type
         if ($type === 'folders') {
             $query->foldersOnly();
         } elseif ($type === 'files') {
             $query->filesOnly();
         }
 
-        // Search
         if ($search) {
             $query->where(function ($q) use ($search) {
                 $q->where('title', 'like', "%{$search}%")
@@ -63,12 +60,17 @@ class StorageController extends Controller
             });
         }
 
-        // Sort: folders first, then by name
         $query->orderByRaw('is_folder DESC, title ASC');
 
         $documents = $query->paginate(50);
 
-        // Get breadcrumbs if in folder
+        // Add file extensions and share status
+        $documents->getCollection()->transform(function ($doc) {
+            $doc->file_extension = $doc->getFileExtension();
+            $doc->is_shared_public = $doc->visibility === 'public';
+            return $doc;
+        });
+
         $breadcrumbs = [];
         if ($folderId) {
             $folder = Document::find($folderId);
@@ -90,34 +92,6 @@ class StorageController extends Controller
     }
 
     /**
-     * Get public documents
-     */
-    public function publicIndex(Request $request)
-    {
-        $search = $request->input('q');
-
-        $query = Document::forStorage()
-            ->public()
-            ->filesOnly() // Only files can be public
-            ->with([
-                'uploader:id,name',
-                'organization:id,name,logo,logo_url',
-                'latestVersion:id,document_id,version_number'
-            ]);
-
-        if ($search) {
-            $query->where(function ($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                    ->orWhere('description', 'like', "%{$search}%");
-            });
-        }
-
-        $documents = $query->latest()->paginate(20);
-
-        return response()->json($documents);
-    }
-
-    /**
      * Create a new folder
      */
     public function createFolder(Request $request)
@@ -129,10 +103,8 @@ class StorageController extends Controller
             'description' => 'nullable|string|max:1000',
         ]);
 
-        // FIX: Pass as array
         $this->authorize('uploadToStorage', [Document::class, $data['organization_id']]);
 
-        // Verify parent is a folder if provided
         if (!empty($data['parent_id'])) {
             $parent = Document::find($data['parent_id']);
             if (!$parent || !$parent->is_folder) {
@@ -172,13 +144,11 @@ class StorageController extends Controller
         $data = $request->validate([
             'organization_id' => 'required|exists:organizations,id',
             'parent_id' => 'nullable|exists:documents,id',
-            'file' => 'required|file|max:51200', // 50MB
+            'file' => 'required|file|max:51200',
             'title' => 'nullable|string|max:255',
             'description' => 'nullable|string|max:1000',
-            'visibility' => 'required|in:private,org,public',
         ]);
 
-        // FIX: Pass as array
         $this->authorize('uploadToStorage', [Document::class, $data['organization_id']]);
 
         $file = $request->file('file');
@@ -186,26 +156,22 @@ class StorageController extends Controller
 
         $document = null;
         DB::transaction(function () use ($data, $file, $title, &$document) {
-            // Create document
             $document = Document::create([
                 'organization_id' => $data['organization_id'],
                 'parent_id' => $data['parent_id'] ?? null,
                 'title' => $title,
                 'description' => $data['description'] ?? null,
                 'context' => 'storage',
-                'visibility' => $data['visibility'],
+                'visibility' => 'org',
                 'mime_type' => $file->getMimeType(),
                 'file_size' => $file->getSize(),
                 'created_by' => auth()->id(),
                 'uploaded_by' => auth()->id(),
                 'type' => 'other',
-                'published_at' => $data['visibility'] === 'public' ? now() : null,
             ]);
 
-            // Store file
             $stored = $this->uploads->storeDocumentVersion($document->id, $file);
 
-            // Create version
             $version = DocumentVersion::create([
                 'document_id' => $document->id,
                 'version_number' => 1,
@@ -225,12 +191,15 @@ class StorageController extends Controller
             [
                 'document_name' => $document->title,
                 'file_size' => $document->file_size,
-                'visibility' => $document->visibility,
             ],
             auth()->user()->name . " uploaded: {$document->title}"
         );
 
-        return response()->json($document->load(['latestVersion', 'uploader']), 201);
+        $document->load(['latestVersion', 'uploader', 'organization']);
+        $document->file_extension = $document->getFileExtension();
+        $document->is_shared_public = false;
+
+        return response()->json($document, 201);
     }
 
     /**
@@ -243,32 +212,22 @@ class StorageController extends Controller
         $data = $request->validate([
             'title' => 'sometimes|string|max:255',
             'description' => 'nullable|string|max:1000',
-            'visibility' => 'sometimes|in:private,org,public',
             'parent_id' => 'nullable|exists:documents,id',
         ]);
 
-        // Prevent moving folder into itself or its descendants
         if (isset($data['parent_id']) && $document->is_folder) {
             if ($data['parent_id'] === $document->id) {
                 return response()->json(['message' => 'Cannot move folder into itself'], 400);
             }
-            // Check if new parent is a descendant
+
             $parent = Document::find($data['parent_id']);
             if ($parent && $this->isDescendant($document->id, $parent)) {
                 return response()->json(['message' => 'Cannot move folder into its own subfolder'], 400);
             }
         }
 
-        $oldData = $document->only(['title', 'visibility', 'parent_id']);
-
+        $oldData = $document->only(['title', 'parent_id']);
         $document->update($data);
-
-        // Update published_at if visibility changed
-        if (isset($data['visibility'])) {
-            $document->update([
-                'published_at' => $data['visibility'] === 'public' ? now() : null
-            ]);
-        }
 
         ActivityLogger::log(
             $document->organization_id,
@@ -294,11 +253,9 @@ class StorageController extends Controller
         $isFolder = $document->is_folder;
 
         DB::transaction(function () use ($document) {
-            // If folder, delete all contents recursively
             if ($document->is_folder) {
                 $this->deleteFolder($document);
             } else {
-                // Delete file versions from storage
                 foreach ($document->versions as $version) {
                     Storage::delete($version->file_path);
                 }
@@ -320,133 +277,28 @@ class StorageController extends Controller
     }
 
     /**
-     * Move document/folder
-     */
-    public function move(Request $request, Document $document)
-    {
-        $this->authorize('updateStorage', $document);
-
-        $data = $request->validate([
-            'parent_id' => 'nullable|exists:documents,id',
-        ]);
-
-        $newParentId = $data['parent_id'] ?? null;
-
-        // Validate target is a folder
-        if ($newParentId) {
-            $targetParent = Document::find($newParentId);
-            if (!$targetParent || !$targetParent->is_folder) {
-                return response()->json(['message' => 'Target must be a folder'], 400);
-            }
-
-            // Prevent moving folder into itself or descendants
-            if ($document->is_folder && $this->isDescendant($document->id, $targetParent)) {
-                return response()->json(['message' => 'Cannot move folder into its own subfolder'], 400);
-            }
-        }
-
-        $oldParent = $document->parent;
-        $document->update(['parent_id' => $newParentId]);
-
-        ActivityLogger::log(
-            $document->organization_id,
-            'document_moved',
-            Document::class,
-            $document->id,
-            [
-                'name' => $document->title,
-                'from' => $oldParent?->title ?? 'Root',
-                'to' => $document->parent?->title ?? 'Root',
-            ],
-            auth()->user()->name . " moved: {$document->title}"
-        );
-
-        return response()->json($document->load('parent'));
-    }
-
-    /**
-     * Copy document (not folder)
-     */
-    public function copy(Request $request, Document $document)
-    {
-        // FIX: Pass as array
-        $this->authorize('viewStorage', [Document::class, $document->organization_id]);
-
-        if ($document->is_folder) {
-            return response()->json(['message' => 'Cannot copy folders'], 400);
-        }
-
-        $data = $request->validate([
-            'parent_id' => 'nullable|exists:documents,id',
-            'title' => 'nullable|string|max:255',
-        ]);
-
-        $copy = null;
-        DB::transaction(function () use ($document, $data, &$copy) {
-            // Create copy of document
-            $copy = $document->replicate();
-            $copy->title = $data['title'] ?? ($document->title . ' (Copy)');
-            $copy->parent_id = $data['parent_id'] ?? $document->parent_id;
-            $copy->created_by = auth()->id();
-            $copy->uploaded_by = auth()->id();
-            $copy->save();
-
-            // Copy latest version
-            $originalVersion = $document->latestVersion;
-            if ($originalVersion) {
-                // Copy file in storage
-                $newPath = str_replace(
-                    "documents/{$document->id}",
-                    "documents/{$copy->id}",
-                    $originalVersion->file_path
-                );
-                Storage::copy($originalVersion->file_path, $newPath);
-
-                // Create version record
-                $newVersion = DocumentVersion::create([
-                    'document_id' => $copy->id,
-                    'version_number' => 1,
-                    'file_path' => $newPath,
-                    'note' => 'Copied from original',
-                    'uploaded_by' => auth()->id(),
-                ]);
-
-                $copy->update(['latest_version_id' => $newVersion->id]);
-            }
-        });
-
-        ActivityLogger::log(
-            $document->organization_id,
-            'document_copied',
-            Document::class,
-            $copy->id,
-            ['original' => $document->title, 'copy' => $copy->title],
-            auth()->user()->name . " copied: {$document->title}"
-        );
-
-        return response()->json($copy->load(['latestVersion', 'uploader']), 201);
-    }
-
-    /**
      * Get document/folder details
      */
     public function show(Document $document)
     {
-        // FIX: Pass as array
         $this->authorize('viewStorage', [Document::class, $document->organization_id]);
 
         if ($document->context !== 'storage') {
             return response()->json(['message' => 'Not a storage document'], 400);
         }
 
-        return response()->json($document->load([
+        $document->load([
             'uploader',
             'organization',
             'parent',
             'versions',
             'latestVersion',
-            'share'
-        ]));
+        ]);
+
+        $document->file_extension = $document->getFileExtension();
+        $document->is_shared_public = $document->visibility === 'public';
+
+        return response()->json($document);
     }
 
     /**
@@ -460,7 +312,6 @@ class StorageController extends Controller
             return response()->json(['message' => 'organization_id required'], 400);
         }
 
-        // FIX: Pass as array
         $this->authorize('viewStorage', [Document::class, $orgId]);
 
         $stats = Document::forStorage()
@@ -494,7 +345,6 @@ class StorageController extends Controller
             if ($child->is_folder) {
                 $this->deleteFolder($child);
             } else {
-                // Delete file versions
                 foreach ($child->versions as $version) {
                     Storage::delete($version->file_path);
                 }

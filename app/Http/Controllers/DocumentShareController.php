@@ -19,17 +19,38 @@ class DocumentShareController extends Controller
     private const FAILED_ATTEMPT_WINDOW_MINUTES = 15;
 
     /**
-     * Get or create share configuration for a document
+     * Helper to resolve document from either Global (1 arg) or Org-scoped (2 args) routes
      */
-    public function getShare(Document $document)
+    private function resolveDocument($context, $document = null): Document
     {
-        $this->authorize('share', $document);
+        // If the first argument is already a Document, we are in the Global route
+        if ($context instanceof Document) {
+            return $context;
+        }
 
-        $share = $document->share()->with(['creator:id,name,email'])->first();
+        // Otherwise, we are in the Org route: 1st arg is orgId (string), 2nd is Document
+        if ($document instanceof Document) {
+            return $document;
+        }
+
+        abort(404, 'Document not found');
+    }
+
+    /**
+     * Get or create share configuration for a document
+     * Accepts Document|string to handle both route patterns
+     */
+    public function getShare(string|Document $context, ?Document $document = null)
+    {
+        $doc = $this->resolveDocument($context, $document);
+
+        $this->authorize('share', $doc);
+
+        $share = $doc->share()->with(['creator:id,name,email'])->first();
 
         if (!$share) {
             $share = DocumentShare::create([
-                'document_id' => $document->id,
+                'document_id' => $doc->id,
                 'access_level' => 'org_only',
                 'created_by' => auth()->id(),
                 'share_token' => $this->generateSecureToken(),
@@ -39,7 +60,7 @@ class DocumentShareController extends Controller
 
         return response()->json([
             'id' => $share->id,
-            'document_id' => $document->id,
+            'document_id' => $doc->id,
             'access_level' => $share->access_level,
             'share_token' => $share->share_token,
             'share_url' => url("/share/{$share->share_token}"),
@@ -62,9 +83,11 @@ class DocumentShareController extends Controller
     /**
      * Update share access level with comprehensive validation
      */
-    public function updateShare(Request $request, Document $document)
+    public function updateShare(Request $request, string|Document $context, ?Document $document = null)
     {
-        $this->authorize('share', $document);
+        $doc = $this->resolveDocument($context, $document);
+
+        $this->authorize('share', $doc);
 
         $data = $request->validate([
             'access_level' => 'required|in:org_only,link,public',
@@ -75,8 +98,8 @@ class DocumentShareController extends Controller
             'allowed_ips.*' => 'ip',
         ]);
 
-        $share = $document->share ?? DocumentShare::create([
-            'document_id' => $document->id,
+        $share = $doc->share ?? DocumentShare::create([
+            'document_id' => $doc->id,
             'created_by' => auth()->id(),
             'share_token' => $this->generateSecureToken(),
         ]);
@@ -106,12 +129,12 @@ class DocumentShareController extends Controller
 
         // Update document visibility and publish date
         if ($data['access_level'] === 'public') {
-            $document->update([
+            $doc->update([
                 'visibility' => 'public',
-                'published_at' => $document->published_at ?? now(),
+                'published_at' => $doc->published_at ?? now(),
             ]);
         } else if ($data['access_level'] === 'org_only') {
-            $document->update([
+            $doc->update([
                 'visibility' => 'org',
                 'published_at' => null,
             ]);
@@ -119,10 +142,10 @@ class DocumentShareController extends Controller
 
         // Log the change
         ActivityLogger::log(
-            $document->organization_id,
+            $doc->organization_id,
             'share_updated',
             Document::class,
-            $document->id,
+            $doc->id,
             [
                 'old_level' => $oldAccessLevel,
                 'new_level' => $data['access_level'],
@@ -130,7 +153,7 @@ class DocumentShareController extends Controller
                 'has_expiry' => !empty($data['expires_at']),
                 'has_download_limit' => !empty($data['max_downloads']),
             ],
-            auth()->user()->name . " updated share settings for: {$document->title}"
+            auth()->user()->name . " updated share settings for: {$doc->title}"
         );
 
         return response()->json([
@@ -152,11 +175,12 @@ class DocumentShareController extends Controller
     /**
      * Revoke share link
      */
-    public function revokeShare(Document $document)
+    public function revokeShare(string|Document $context, ?Document $document = null)
     {
-        $this->authorize('share', $document);
+        $doc = $this->resolveDocument($context, $document);
+        $this->authorize('share', $doc);
 
-        $share = $document->share;
+        $share = $doc->share;
 
         if (!$share) {
             return response()->json(['message' => 'No share found for this document'], 404);
@@ -174,18 +198,18 @@ class DocumentShareController extends Controller
         ]);
 
         // Update document visibility
-        $document->update([
+        $doc->update([
             'visibility' => 'org',
             'published_at' => null,
         ]);
 
         ActivityLogger::log(
-            $document->organization_id,
+            $doc->organization_id,
             'share_revoked',
             Document::class,
-            $document->id,
+            $doc->id,
             ['previous_level' => $oldLevel],
-            auth()->user()->name . " revoked share link for: {$document->title}"
+            auth()->user()->name . " revoked share link for: {$doc->title}"
         );
 
         return response()->json(['message' => 'Share link revoked successfully']);
@@ -194,11 +218,12 @@ class DocumentShareController extends Controller
     /**
      * Get share statistics for owner
      */
-    public function getShareStats(Document $document)
+    public function getShareStats(string|Document $context, ?Document $document = null)
     {
-        $this->authorize('viewShareStats', $document);
+        $doc = $this->resolveDocument($context, $document);
+        $this->authorize('viewShareStats', $doc);
 
-        $share = $document->share;
+        $share = $doc->share;
 
         if (!$share) {
             return response()->json([
@@ -263,11 +288,12 @@ class DocumentShareController extends Controller
     /**
      * Get access logs for document share
      */
-    public function getAccessLogs(Document $document, Request $request)
+    public function getAccessLogs(Request $request, string|Document $context, ?Document $document = null)
     {
-        $this->authorize('viewShareLogs', $document);
+        $doc = $this->resolveDocument($context, $document);
+        $this->authorize('viewShareLogs', $doc);
 
-        $share = $document->share;
+        $share = $doc->share;
 
         if (!$share) {
             return response()->json(['message' => 'No share found for this document'], 404);

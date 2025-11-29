@@ -101,36 +101,71 @@ class PermissionSeeder extends Seeder
             ],
 
             // Document Storage
+            // [
+            //     'name' => 'view_storage',
+            //     'display_name' => 'View Storage',
+            //     'description' => 'View organization document storage',
+            //     'category' => 'storage'
+            // ],
+            // [
+            //     'name' => 'upload_documents',
+            //     'display_name' => 'Upload Documents',
+            //     'description' => 'Upload documents to organization storage',
+            //     'category' => 'storage'
+            // ],
+            // [
+            //     'name' => 'create_folders',
+            //     'display_name' => 'Create Folders',
+            //     'description' => 'Create folders in organization storage',
+            //     'category' => 'storage'
+            // ],
+            // [
+            //     'name' => 'delete_documents',
+            //     'display_name' => 'Delete Documents',
+            //     'description' => 'Delete documents and folders from storage',
+            //     'category' => 'storage'
+            // ],
+            // [
+            //     'name' => 'manage_document_sharing',
+            //     'display_name' => 'Manage Document Sharing',
+            //     'description' => 'Control document sharing and access permissions',
+            //     'category' => 'storage'
+            // ],
+
+            // Storage - Basic Member Permissions (granted on join approval)
             [
                 'name' => 'view_storage',
                 'display_name' => 'View Storage',
                 'description' => 'View organization document storage',
-                'category' => 'storage'
+                'category' => 'storage',
             ],
             [
                 'name' => 'upload_documents',
-                'display_name' => 'Upload Documents',
-                'description' => 'Upload documents to organization storage',
-                'category' => 'storage'
+                'display_name' => 'Upload & Share Documents',
+                'description' => 'Upload documents, create folders, and share own documents publicly',
+                'category' => 'storage',
             ],
             [
                 'name' => 'create_folders',
                 'display_name' => 'Create Folders',
-                'description' => 'Create folders in organization storage',
-                'category' => 'storage'
+                'description' => 'Create folders in document storage',
+                'category' => 'storage',
             ],
             [
                 'name' => 'delete_documents',
-                'display_name' => 'Delete Documents',
-                'description' => 'Delete documents and folders from storage',
-                'category' => 'storage'
+                'display_name' => 'Delete Own Documents',
+                'description' => 'Delete own uploaded documents',
+                'category' => 'storage',
             ],
+
+            // Storage - Administrative Permission (manually granted)
             [
-                'name' => 'manage_document_sharing',
-                'display_name' => 'Manage Document Sharing',
-                'description' => 'Control document sharing and access permissions',
-                'category' => 'storage'
+                'name' => 'admin_delete_documents',
+                'display_name' => 'Delete Any Document',
+                'description' => 'Administrative permission to delete any member\'s documents',
+                'category' => 'storage',
             ],
+
 
             // Review System
             [
