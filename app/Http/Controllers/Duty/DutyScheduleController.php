@@ -154,6 +154,11 @@ class DutyScheduleController extends Controller
             'recurrence_end_date' => 'nullable|date|after:date',
             'officer_ids' => 'nullable|array',
             'officer_ids.*' => 'exists:users,id',
+
+            'check_in_window_start' => 'nullable|date_format:H:i',
+            'check_in_window_end' => 'nullable|date_format:H:i',
+            'check_out_window_start' => 'nullable|date_format:H:i',
+            'check_out_window_end' => 'nullable|date_format:H:i',
         ]);
 
         $schedule = $this->dutyService->createSchedule($organization->id, $data, auth()->id());
@@ -208,12 +213,25 @@ class DutyScheduleController extends Controller
             'title' => 'sometimes|string|max:255',
             'description' => 'nullable|string',
             'date' => 'sometimes|date',
-            'start_time' => 'sometimes|date_format:H:i',
-            'end_time' => 'sometimes|date_format:H:i',
+            'start_time' => 'sometimes|date_format:H:i:s', // CHANGED: Accept H:i:s format
+            'end_time' => 'sometimes|date_format:H:i:s',
             'location' => 'nullable|string|max:255',
             'required_officers' => 'sometimes|integer|min:1|max:50',
             'status' => 'sometimes|in:draft,published,completed,cancelled',
+
+            'check_in_window_start' => 'nullable|date_format:H:i',
+            'check_in_window_end' => 'nullable|date_format:H:i',
+            'check_out_window_start' => 'nullable|date_format:H:i',
+            'check_out_window_end' => 'nullable|date_format:H:i',
         ]);
+
+        // Normalize time format if needed
+        if (isset($data['start_time']) && strlen($data['start_time']) === 5) {
+            $data['start_time'] .= ':00';
+        }
+        if (isset($data['end_time']) && strlen($data['end_time']) === 5) {
+            $data['end_time'] .= ':00';
+        }
 
         $originalData = $dutySchedule->only(array_keys($data));
 
@@ -430,6 +448,58 @@ class DutyScheduleController extends Controller
         ]);
     }
 
+    // public function statistics(Request $request, Organization $organization)
+    // {
+    //     $this->authorize('viewDutySchedules', $organization);
+
+    //     $startDate = $request->input('start_date', now()->startOfMonth()->toDateString());
+    //     $endDate = $request->input('end_date', now()->endOfMonth()->toDateString());
+
+    //     $stats = $this->dutyService->getStatistics($organization->id, $startDate, $endDate);
+
+    //     // Add time series data for charts
+    //     $timeSeries = [];
+    //     $currentDate = Carbon::parse($startDate);
+    //     $end = Carbon::parse($endDate);
+
+    //     $days = $currentDate->diffInDays($end);
+    //     $groupBy = $days > 30 ? 'week' : 'day';
+
+    //     while ($currentDate->lte($end)) {
+    //         $periodStart = $currentDate->copy()->toDateString();
+    //         $periodEnd = $groupBy === 'week'
+    //             ? $currentDate->copy()->addWeek()->toDateString()
+    //             : $currentDate->copy()->toDateString();
+
+    //         $periodSchedules = DutySchedule::forOrganization($organization->id)
+    //             ->whereBetween('date', [$periodStart, $periodEnd])
+    //             ->with('assignments')
+    //             ->get();
+
+    //         $periodAssignments = $periodSchedules->flatMap(fn($s) => $s->assignments);
+    //         $totalAssignments = $periodAssignments->count();
+    //         $completedAssignments = $periodAssignments->where('status', 'completed')->count();
+
+    //         $totalRequired = $periodSchedules->sum('required_officers');
+    //         $totalFilled = $periodSchedules->sum(function ($schedule) {
+    //             return $schedule->assignments->whereIn('status', ['assigned', 'confirmed', 'completed'])->count();
+    //         });
+
+    //         $timeSeries[] = [
+    //             'date' => $currentDate->format($groupBy === 'week' ? 'M d' : 'M d'),
+    //             'completion_rate' => $totalAssignments > 0 ? round(($completedAssignments / $totalAssignments) * 100, 1) : 0,
+    //             'fill_rate' => $totalRequired > 0 ? round(($totalFilled / $totalRequired) * 100, 1) : 0
+    //         ];
+
+    //         $currentDate = $groupBy === 'week' ? $currentDate->addWeek() : $currentDate->addDay();
+    //     }
+
+    //     $stats['time_series'] = $timeSeries;
+
+    //     return response()->json($stats);
+    // }
+
+
     public function statistics(Request $request, Organization $organization)
     {
         $this->authorize('viewDutySchedules', $organization);
@@ -438,6 +508,49 @@ class DutyScheduleController extends Controller
         $endDate = $request->input('end_date', now()->endOfMonth()->toDateString());
 
         $stats = $this->dutyService->getStatistics($organization->id, $startDate, $endDate);
+
+        // Add check-in/out statistics
+        $assignmentsWithCheckIn = DutyAssignment::whereHas('dutySchedule', function ($q) use ($organization, $startDate, $endDate) {
+            $q->where('organization_id', $organization->id)
+                ->whereBetween('date', [$startDate, $endDate]);
+        })
+            ->whereNotNull('check_in_at')
+            ->with('dutySchedule')
+            ->get();
+
+        $totalCompleted = $assignmentsWithCheckIn->where('status', 'completed')->count();
+        $checkInRate = $totalCompleted > 0
+            ? round(($assignmentsWithCheckIn->count() / $totalCompleted) * 100, 1)
+            : 0;
+
+        // Calculate average actual duration (based on check-in/out)
+        $actualDurations = $assignmentsWithCheckIn
+            ->filter(fn($a) => $a->check_in_at && $a->check_out_at)
+            ->map(function ($a) {
+                $start = Carbon::parse($a->check_in_at);
+                $end = Carbon::parse($a->check_out_at);
+                return $end->diffInHours($start, true); // true for float result
+            });
+
+        $avgActualDuration = $actualDurations->isNotEmpty()
+            ? round($actualDurations->average(), 1)
+            : 0;
+
+        // Calculate on-time rate (checked in within 15 minutes of scheduled start)
+        $onTimeCount = $assignmentsWithCheckIn->filter(function ($a) {
+            $scheduledStart = Carbon::parse($a->dutySchedule->date . ' ' . $a->dutySchedule->start_time);
+            $checkIn = Carbon::parse($a->check_in_at);
+            $diffMinutes = $scheduledStart->diffInMinutes($checkIn, false);
+            return $diffMinutes >= -15 && $diffMinutes <= 15; // Within 15 minutes
+        })->count();
+
+        $onTimeRate = $assignmentsWithCheckIn->isNotEmpty()
+            ? round(($onTimeCount / $assignmentsWithCheckIn->count()) * 100, 1)
+            : 0;
+
+        $stats['check_in_rate'] = $checkInRate;
+        $stats['avg_actual_duration'] = $avgActualDuration;
+        $stats['on_time_rate'] = $onTimeRate;
 
         // Add time series data for charts
         $timeSeries = [];

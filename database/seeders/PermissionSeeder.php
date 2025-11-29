@@ -183,49 +183,6 @@ class PermissionSeeder extends Seeder
 
 
             // Duty Management
-            // [
-            //     'name' => 'view_duty_schedules',
-            //     'display_name' => 'View Duty Schedules',
-            //     'description' => 'View organization duty schedules',
-            //     'category' => 'duty'
-            // ],
-            // [
-            //     'name' => 'create_duty_schedules',
-            //     'display_name' => 'Create Duty Schedules',
-            //     'description' => 'Create new duty schedules',
-            //     'category' => 'duty'
-            // ],
-            // [
-            //     'name' => 'edit_duty_schedules',
-            //     'display_name' => 'Edit Duty Schedules',
-            //     'description' => 'Edit existing duty schedules',
-            //     'category' => 'duty'
-            // ],
-            // [
-            //     'name' => 'delete_duty_schedules',
-            //     'display_name' => 'Delete Duty Schedules',
-            //     'description' => 'Delete duty schedules',
-            //     'category' => 'duty'
-            // ],
-            // [
-            //     'name' => 'assign_duties',
-            //     'display_name' => 'Assign Duties',
-            //     'description' => 'Assign duties to organization members',
-            //     'category' => 'duty'
-            // ],
-            // [
-            //     'name' => 'approve_duty_swaps',
-            //     'display_name' => 'Approve Duty Swaps',
-            //     'description' => 'Approve or decline duty swap requests',
-            //     'category' => 'duty'
-            // ],
-            // [
-            //     'name' => 'manage_duty_templates',
-            //     'display_name' => 'Manage Duty Templates',
-            //     'description' => 'Create and manage duty schedule templates',
-            //     'category' => 'duty'
-            // ],
-
             [
                 'name' => 'participate_in_duties',
                 'display_name' => 'Participate in Duties',

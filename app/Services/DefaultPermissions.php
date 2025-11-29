@@ -167,14 +167,10 @@ class DefaultPermissions
             ],
             'reviews' => [
                 'create_reviews',
-                // 'view_reviews',
-                // 'manage_reviews',
-                // 'assign_reviewers',
-                // 'comment_on_reviews',
             ],
             'duty' => [
-                'participate_in_duties',  // For all approved members
-                'manage_duty_system',     // For admins only (by default)
+                'participate_in_duties',
+                'manage_duty_system',
             ],
             'analytics' => [
                 'view_statistics',

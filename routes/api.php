@@ -367,14 +367,6 @@ Route::middleware(['auth:api'])->group(function () {
         Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments'])
             ->middleware('org.permission:participate_in_duties');
 
-        // Member self-service (respond, check in/out)
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/respond', [DutyAssignmentController::class, 'respond'])
-            ->middleware('org.permission:participate_in_duties');
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-in', [DutyAssignmentController::class, 'checkIn'])
-            ->middleware('org.permission:participate_in_duties');
-        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-out', [DutyAssignmentController::class, 'checkOut'])
-            ->middleware('org.permission:participate_in_duties');
-
         // Availability (any member with permission)
         Route::get('/duty-availability', [DutyAvailabilityController::class, 'index'])
             ->middleware('org.permission:participate_in_duties');
@@ -402,6 +394,12 @@ Route::middleware(['auth:api'])->group(function () {
             ->middleware('org.permission:participate_in_duties');
 
         // === ADMIN ACTIONS (manage_duty_system permission) ===
+
+        // Statistics & Audit Logs (admin only)
+        Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics'])
+            ->middleware('org.permission:manage_duty_system');
+        Route::get('/duty-audit-logs', [DutyScheduleController::class, 'auditLogs'])
+            ->middleware('org.permission:manage_duty_system');
 
         // View schedules (read-only for participants, full access for admins)
         Route::get('/duty-schedules', [DutyScheduleController::class, 'index'])
@@ -433,11 +431,13 @@ Route::middleware(['auth:api'])->group(function () {
         Route::post('/duty-swaps/{swapRequest}/review', [DutySwapController::class, 'adminReview'])
             ->middleware('org.permission:manage_duty_system');
 
-        // Statistics & Audit Logs (admin only)
-        Route::get('/duty-schedules/statistics', [DutyScheduleController::class, 'statistics'])
-            ->middleware('org.permission:manage_duty_system');
-        Route::get('/duty-audit-logs', [DutyScheduleController::class, 'auditLogs'])
-            ->middleware('org.permission:manage_duty_system');
+        // Member self-service (respond, check in/out)
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/respond', [DutyAssignmentController::class, 'respond'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-in', [DutyAssignmentController::class, 'checkIn'])
+            ->middleware('org.permission:participate_in_duties');
+        Route::post('/duty-schedules/{dutySchedule}/assignments/{dutyAssignment}/check-out', [DutyAssignmentController::class, 'checkOut'])
+            ->middleware('org.permission:participate_in_duties');
 
         // Templates (admin only)
         Route::get('/duty-templates', [DutyTemplateController::class, 'index'])
@@ -552,7 +552,7 @@ Route::middleware(['auth:api'])->group(function () {
             ->middleware('org.permission:view_storage');
         Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
             ->middleware('org.permission:upload_documents');
-            
+
 
         #region New Version
 

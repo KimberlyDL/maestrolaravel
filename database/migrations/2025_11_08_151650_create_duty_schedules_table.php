@@ -46,20 +46,6 @@ return new class extends Migration
             $table->unique(['duty_schedule_id', 'officer_id']);
         });
 
-        Schema::create('duty_availability', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('organization_id')->constrained()->onDelete('cascade');
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->date('date');
-            $table->time('start_time');
-            $table->time('end_time');
-            $table->enum('availability_type', ['available', 'unavailable', 'preferred'])->default('available');
-            $table->text('reason')->nullable();
-            $table->timestamps();
-
-            $table->index(['user_id', 'date']);
-        });
-
         Schema::create('duty_swap_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('duty_assignment_id')->constrained()->onDelete('cascade');

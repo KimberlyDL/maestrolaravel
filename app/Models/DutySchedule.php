@@ -25,6 +25,11 @@ class DutySchedule extends Model
         'recurrence_days',
         'recurrence_end_date',
         'created_by',
+
+        'check_in_window_start',
+        'check_in_window_end',
+        'check_out_window_start',
+        'check_out_window_end',
     ];
 
     protected $casts = [
