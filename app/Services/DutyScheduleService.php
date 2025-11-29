@@ -29,6 +29,12 @@ class DutyScheduleService
                 'recurrence_days' => $data['recurrence_days'] ?? null,
                 'recurrence_end_date' => $data['recurrence_end_date'] ?? null,
                 'created_by' => $creatorId,
+
+                // Ensure windows are saved
+                'check_in_window_start' => $data['check_in_window_start'] ?? null,
+                'check_in_window_end' => $data['check_in_window_end'] ?? null,
+                'check_out_window_start' => $data['check_out_window_start'] ?? null,
+                'check_out_window_end' => $data['check_out_window_end'] ?? null,
             ]);
 
             // Assign officers if provided
@@ -53,7 +59,6 @@ class DutyScheduleService
         $assignments = [];
 
         foreach ($officerIds as $officerId) {
-            // Check if not already assigned
             $exists = DutyAssignment::where('duty_schedule_id', $schedule->id)
                 ->where('officer_id', $officerId)
                 ->exists();
@@ -62,7 +67,9 @@ class DutyScheduleService
                 $assignments[] = DutyAssignment::create([
                     'duty_schedule_id' => $schedule->id,
                     'officer_id' => $officerId,
-                    'status' => 'assigned',
+                    // FIX: Set default to 'confirmed' so they are Auto-Accepted
+                    'status' => 'confirmed',
+                    'confirmed_at' => now(),
                     'notes' => $notes,
                     'assigned_by' => $assignerId,
                 ]);
@@ -72,9 +79,6 @@ class DutyScheduleService
         return $assignments;
     }
 
-    /**
-     * Create recurring duty schedules
-     */
     private function createRecurringSchedules(DutySchedule $baseSchedule)
     {
         if (!$baseSchedule->recurrence_end_date) {
@@ -96,12 +100,13 @@ class DutyScheduleService
                 $newSchedule->save();
                 $created[] = $newSchedule;
 
-                // Copy assignments
                 foreach ($baseSchedule->assignments as $assignment) {
                     DutyAssignment::create([
                         'duty_schedule_id' => $newSchedule->id,
                         'officer_id' => $assignment->officer_id,
-                        'status' => 'assigned',
+                        // Fix: Ensure recurring assignments are also confirmed
+                        'status' => 'confirmed',
+                        'confirmed_at' => now(),
                         'assigned_by' => $assignment->assigned_by,
                     ]);
                 }
@@ -113,50 +118,37 @@ class DutyScheduleService
         return $created;
     }
 
-    /**
-     * Get next recurrence date
-     */
     private function getNextRecurrenceDate(Carbon $currentDate, string $recurrenceType, ?array $recurrenceDays)
     {
         switch ($recurrenceType) {
             case 'daily':
                 return $currentDate->addDay();
-
             case 'weekly':
                 if ($recurrenceDays && count($recurrenceDays) > 0) {
-                    // Find next day in recurrence_days
                     $currentDayOfWeek = $currentDate->dayOfWeek;
                     $nextDay = null;
-
                     foreach ($recurrenceDays as $day) {
                         if ($day > $currentDayOfWeek) {
                             $nextDay = $day;
                             break;
                         }
                     }
-
                     if ($nextDay === null) {
-                        // Wrap to next week
                         $nextDay = $recurrenceDays[0];
                         $currentDate->addWeek();
                     }
-
                     return $currentDate->next($nextDay);
                 } else {
                     return $currentDate->addWeek();
                 }
-
             case 'biweekly':
                 return $currentDate->addWeeks(2);
-
             case 'monthly':
                 return $currentDate->addMonth();
-
             default:
                 return null;
         }
     }
-
     /**
      * Get duty statistics - FIX 6: Ensure accurate filtering and complete data structure
      */

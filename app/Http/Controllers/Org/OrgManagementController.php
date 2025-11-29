@@ -12,9 +12,16 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use App\Services\NotificationService;
 
 class OrgManagementController extends Controller
 {
+    protected $notificationService;
+
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
     /**
      * Get organization dashboard data
      */
@@ -272,6 +279,8 @@ class OrgManagementController extends Controller
     {
         $this->authorize('manage', $organization);
 
+        $this->notificationService->markJoinRequestNotificationsRead(Auth::id(), $organization->id);
+
         $status = $request->query('status', 'pending');
 
         $requests = DB::table('organization_join_requests as ojr')
@@ -389,6 +398,9 @@ class OrgManagementController extends Controller
             Log::info("[OrgApproval] Join request status updated to 'approved'. Transaction preparing to commit.");
         });
 
+        // 🔔 TRIGGER NOTIFICATION TO USER
+        $this->notificationService->notifyJoinRequestDecided($joinRequest, 'approved', $organization->name);
+
         // 💡 LOG POINT 6: After transaction commit, confirming ActivityLogger data
         Log::info("[OrgApproval] ActivityLogger called for user: {$user->name} ({$user->id}) as {$role}.");
 
@@ -407,6 +419,7 @@ class OrgManagementController extends Controller
             'user_name' => $user->name,
         ]);
     }
+
     /**
      * Decline join request
      */
@@ -437,6 +450,9 @@ class OrgManagementController extends Controller
                 'reviewed_at' => now(),
                 'updated_at' => now(),
             ]);
+
+        // 🔔 TRIGGER NOTIFICATION TO USER
+        $this->notificationService->notifyJoinRequestDecided($joinRequest, 'approved', $organization->name);
 
         ActivityLogger::log(
             $organization->id,

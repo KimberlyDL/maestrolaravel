@@ -34,7 +34,7 @@ class NotificationService
     public function notifyDutyAssigned($assignment)
     {
         $schedule = $assignment->dutySchedule;
-        
+
         $this->send(
             $assignment->officer_id,
             'New Duty Assigned',
@@ -130,10 +130,10 @@ class NotificationService
             $swapRequest->dutyAssignment->dutySchedule->organization_id
         );
     }
-    
+
     public function notifySwapRejected($swapRequest)
     {
-         $this->send(
+        $this->send(
             $swapRequest->from_officer_id,
             'Swap Request Rejected by Admin',
             "Your swap request was rejected by an admin.",
@@ -167,5 +167,89 @@ class NotificationService
     public function notifyAssignmentDeclined($assignment)
     {
         // Notify Admins
+    }
+
+    /**
+     * Notify Admins & Handlers about a new Join Request
+     */
+    public function notifyJoinRequestCreated($joinRequest)
+    {
+        // 1. Identify the Organization
+        // We assume $joinRequest is a DB row object or model. If it's a raw object, we fetch the ID.
+        $orgId = $joinRequest->organization_id;
+        $requesterId = $joinRequest->user_id;
+
+        // Fetch requester name for the message
+        $requester = User::find($requesterId);
+        $requesterName = $requester ? $requester->name : 'A user';
+
+        // 2. Find Users to Notify:
+        //    - Organization Admins (role = 'admin')
+        //    - Users with 'approve_join_requests' permission (if permission system allows custom roles)
+
+        // Get all members of the org
+        $recipients = OrganizationUser::where('organization_id', $orgId)
+            ->where(function ($query) {
+                // Always notify admins
+                $query->where('role', 'admin');
+
+                // OR notify anyone with the specific permission (if you have a way to check permissions via DB)
+                // Since permissions might be complex to query directly via Eloquent without joining tables,
+                // we'll stick to 'admin' role + standard logic. 
+                // If you have a PermissionService, you could use that to get user IDs.
+                // For now, we assume admins handle this.
+            })
+            ->pluck('user_id');
+
+        // 3. Send Notifications
+        foreach ($recipients as $userId) {
+            $this->send(
+                $userId,
+                'New Join Request',
+                "{$requesterName} has requested to join your organization.",
+                'org.join_request', // Specific type for filtering
+                null, // You could pass the JoinRequest model here if you have one
+                "/org/{$orgId}/join-requests", // Action URL to the list
+                'normal',
+                $orgId
+            );
+        }
+    }
+
+    /**
+     * Notify the User about the decision (Approved/Declined)
+     */
+    public function notifyJoinRequestDecided($joinRequest, $status, $orgName)
+    {
+        $title = $status === 'approved' ? 'Join Request Approved' : 'Join Request Declined';
+        $message = $status === 'approved'
+            ? "Your request to join {$orgName} has been accepted!"
+            : "Your request to join {$orgName} was declined.";
+
+        $actionUrl = $status === 'approved' ? "/org/{$joinRequest->organization_id}/dashboard" : null;
+
+        $this->send(
+            $joinRequest->user_id,
+            $title,
+            $message,
+            'org.join_request_decision',
+            null,
+            $actionUrl,
+            $status === 'approved' ? 'high' : 'normal',
+            $joinRequest->organization_id
+        );
+    }
+
+    /**
+     * Mark all "Join Request" notifications as read for a user in a specific org.
+     * This handles the "Badge" issue - call this when the admin views the list.
+     */
+    public function markJoinRequestNotificationsRead($userId, $orgId)
+    {
+        Notification::where('user_id', $userId)
+            ->where('organization_id', $orgId)
+            ->where('type', 'org.join_request')
+            ->where('is_read', false)
+            ->update(['is_read' => true]);
     }
 }

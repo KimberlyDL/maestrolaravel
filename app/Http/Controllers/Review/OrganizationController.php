@@ -10,9 +10,17 @@ use App\Models\OrganizationUser;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use App\Services\ActivityLogger;
+use App\Services\NotificationService;
 
 class OrganizationController extends Controller
 {
+    protected $notificationService;
+
+    // Inject the service
+    public function __construct(NotificationService $notificationService)
+    {
+        $this->notificationService = $notificationService;
+    }
 
     public function show(Organization $organization)
     {
@@ -480,7 +488,17 @@ class OrganizationController extends Controller
             ], 400);
         }
 
-        \DB::table('organization_join_requests')->insert([
+        // \DB::table('organization_join_requests')->insert([
+        //     'organization_id' => $organization->id,
+        //     'user_id' => $user->id,
+        //     'message' => 'Joined via request',
+        //     'status' => 'pending',
+        //     'created_at' => now(),
+        //     'updated_at' => now(),
+        // ]);
+
+        // Create the request
+        $requestId = \DB::table('organization_join_requests')->insertGetId([
             'organization_id' => $organization->id,
             'user_id' => $user->id,
             'message' => 'Joined via request',
@@ -488,6 +506,12 @@ class OrganizationController extends Controller
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+
+        // Fetch the object to pass to notification
+        $joinRequestObj = \DB::table('organization_join_requests')->where('id', $requestId)->first();
+
+        // 🔔 TRIGGER NOTIFICATION
+        $this->notificationService->notifyJoinRequestCreated($joinRequestObj);
 
         ActivityLogger::log(
             $organization->id,

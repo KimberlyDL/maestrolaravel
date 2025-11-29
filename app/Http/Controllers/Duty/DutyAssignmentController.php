@@ -25,7 +25,7 @@ class DutyAssignmentController extends Controller
             ->where('officer_id', auth()->id())
             ->with([
                 'dutySchedule' => function ($q) {
-                    $q->select('id', 'title', 'description', 'date', 'start_time', 'end_time', 'location', 'required_officers', 'status');
+                    $q->select('id', 'title', 'description', 'date', 'start_time', 'end_time', 'location', 'required_officers', 'status', 'check_in_window_start', 'check_in_window_end', 'check_out_window_start', 'check_out_window_end');
                 },
                 'assigner:id,name'
             ]);
@@ -48,41 +48,10 @@ class DutyAssignmentController extends Controller
     }
 
     /**
-     * Assign officer to duty
+     * Assign officer to duty - AUTO ACCEPTS ASSIGNMENT
      */
     public function store(Request $request, Organization $organization, DutySchedule $dutySchedule)
     {
-        // $this->authorize('manageDutySchedules', $organization);
-
-        // $data = $request->validate([
-        //     'officer_ids' => 'required|array|min:1',
-        //     'officer_ids.*' => 'exists:users,id',
-        //     'notes' => 'nullable|string',
-        // ]);
-
-        // $assignments = $this->dutyService->assignOfficers(
-        //     $dutySchedule,
-        //     $data['officer_ids'],
-        //     auth()->id(),
-        //     $data['notes'] ?? null
-        // );
-
-        // // Send notifications to assigned officers
-        // foreach ($assignments as $assignment) {
-        //     $this->notificationService->send(
-        //         $assignment->officer_id,
-        //         'New Duty Assignment',
-        //         "You have been assigned to '{$dutySchedule->title}' on {$dutySchedule->date}",
-        //         'duty.assigned',
-        //         $dutySchedule,
-        //         "/orgs/{$organization->id}/duties/{$dutySchedule->id}",
-        //         'high',
-        //         $organization->id
-        //     );
-        // }
-
-        // return response()->json($assignments, 201);
-
         $this->authorize('manageDutySchedules', $organization);
 
         $data = $request->validate([
@@ -98,7 +67,8 @@ class DutyAssignmentController extends Controller
             $data['notes'] ?? null
         );
 
-        // AUTO-CONFIRM: Set status to confirmed instead of assigned
+        // === AUTO-CONFIRM LOGIC ===
+        // Automatically set status to 'confirmed' so they can Swap immediately
         foreach ($assignments as $assignment) {
             $assignment->update([
                 'status' => 'confirmed',
@@ -200,29 +170,9 @@ class DutyAssignmentController extends Controller
         return response()->json($dutyAssignment->fresh(['dutySchedule', 'officer']));
     }
 
-    // ... [checkIn and checkOut methods remain unchanged] ...
-
-    // public function checkIn(Organization $organization, DutySchedule $dutySchedule, DutyAssignment $dutyAssignment)
-    // {
-    //     if ($dutyAssignment->officer_id !== auth()->id()) {
-    //         return response()->json(['message' => 'Unauthorized'], 403);
-    //     }
-
-    //     if ($dutyAssignment->status !== 'confirmed') {
-    //         return response()->json(['message' => 'Assignment must be confirmed before checking in'], 400);
-    //     }
-
-    //     if ($dutyAssignment->check_in_at) {
-    //         return response()->json(['message' => 'Already checked in'], 400);
-    //     }
-
-    //     $dutyAssignment->update([
-    //         'check_in_at' => now(),
-    //     ]);
-
-    //     return response()->json($dutyAssignment->fresh(['dutySchedule', 'officer']));
-    // }
-
+    /**
+     * CHECK IN - USER FRIENDLY
+     */
     public function checkIn(Organization $organization, DutySchedule $dutySchedule, DutyAssignment $dutyAssignment)
     {
         if ($dutyAssignment->officer_id !== auth()->id()) {
@@ -230,22 +180,34 @@ class DutyAssignmentController extends Controller
         }
 
         if ($dutyAssignment->status !== 'confirmed') {
-            return response()->json(['message' => 'Assignment must be confirmed before checking in'], 400);
+            return response()->json(['message' => 'You must confirm this assignment before checking in.'], 400);
         }
 
         if ($dutyAssignment->check_in_at) {
-            return response()->json(['message' => 'Already checked in'], 400);
+            return response()->json(['message' => 'You have already checked in.'], 400);
         }
 
-        // Check if within attendance window (if set)
+        // Check window
         if ($dutySchedule->check_in_window_start && $dutySchedule->check_in_window_end) {
-            $now = now()->format('H:i:s');
-            $start = $dutySchedule->check_in_window_start;
-            $end = $dutySchedule->check_in_window_end;
+            $nowStr = now()->format('H:i:s');
 
-            if ($now < $start || $now > $end) {
+            // Normalize for comparison
+            $start = strlen($dutySchedule->check_in_window_start) === 5
+                ? $dutySchedule->check_in_window_start . ':00'
+                : $dutySchedule->check_in_window_start;
+
+            $end = strlen($dutySchedule->check_in_window_end) === 5
+                ? $dutySchedule->check_in_window_end . ':00'
+                : $dutySchedule->check_in_window_end;
+
+            if ($nowStr < $start || $nowStr > $end) {
+                // Format for Humans (e.g. "4:50 PM")
+                $niceStart = Carbon::parse($start)->format('g:i A');
+                $niceEnd = Carbon::parse($end)->format('g:i A');
+                $niceNow = now()->format('g:i A');
+
                 return response()->json([
-                    'message' => "Check-in window is {$start} - {$end}. Current time is outside this window.",
+                    'message' => "Check-in is only available between {$niceStart} and {$niceEnd}. It is currently {$niceNow}.",
                     'window_start' => $start,
                     'window_end' => $end
                 ], 400);
@@ -257,28 +219,9 @@ class DutyAssignmentController extends Controller
         return response()->json($dutyAssignment->fresh(['dutySchedule', 'officer']));
     }
 
-    // public function checkOut(Organization $organization, DutySchedule $dutySchedule, DutyAssignment $dutyAssignment)
-    // {
-    //     if ($dutyAssignment->officer_id !== auth()->id()) {
-    //         return response()->json(['message' => 'Unauthorized'], 403);
-    //     }
-
-    //     if (!$dutyAssignment->check_in_at) {
-    //         return response()->json(['message' => 'Must check in before checking out'], 400);
-    //     }
-
-    //     if ($dutyAssignment->check_out_at) {
-    //         return response()->json(['message' => 'Already checked out'], 400);
-    //     }
-
-    //     $dutyAssignment->update([
-    //         'check_out_at' => now(),
-    //         'status' => 'completed',
-    //     ]);
-
-    //     return response()->json($dutyAssignment->fresh(['dutySchedule', 'officer']));
-    // }
-
+    /**
+     * CHECK OUT - USER FRIENDLY
+     */
     public function checkOut(Organization $organization, DutySchedule $dutySchedule, DutyAssignment $dutyAssignment)
     {
         if ($dutyAssignment->officer_id !== auth()->id()) {
@@ -286,22 +229,33 @@ class DutyAssignmentController extends Controller
         }
 
         if (!$dutyAssignment->check_in_at) {
-            return response()->json(['message' => 'Must check in before checking out'], 400);
+            return response()->json(['message' => 'You must check in first.'], 400);
         }
 
         if ($dutyAssignment->check_out_at) {
-            return response()->json(['message' => 'Already checked out'], 400);
+            return response()->json(['message' => 'You have already checked out.'], 400);
         }
 
-        // Check if within attendance window (if set)
+        // Check window
         if ($dutySchedule->check_out_window_start && $dutySchedule->check_out_window_end) {
-            $now = now()->format('H:i:s');
-            $start = $dutySchedule->check_out_window_start;
-            $end = $dutySchedule->check_out_window_end;
+            $nowStr = now()->format('H:i:s');
 
-            if ($now < $start || $now > $end) {
+            $start = strlen($dutySchedule->check_out_window_start) === 5
+                ? $dutySchedule->check_out_window_start . ':00'
+                : $dutySchedule->check_out_window_start;
+
+            $end = strlen($dutySchedule->check_out_window_end) === 5
+                ? $dutySchedule->check_out_window_end . ':00'
+                : $dutySchedule->check_out_window_end;
+
+            if ($nowStr < $start || $nowStr > $end) {
+                // Format for Humans
+                $niceStart = Carbon::parse($start)->format('g:i A');
+                $niceEnd = Carbon::parse($end)->format('g:i A');
+                $niceNow = now()->format('g:i A');
+
                 return response()->json([
-                    'message' => "Check-out window is {$start} - {$end}. Current time is outside this window.",
+                    'message' => "You can only check out between {$niceStart} and {$niceEnd}. It is currently {$niceNow}.",
                     'window_start' => $start,
                     'window_end' => $end
                 ], 400);
