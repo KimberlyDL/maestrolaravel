@@ -54,4 +54,86 @@ class OrganizationPolicy
         $role = $organization->getUserRole($user->id);
         return in_array($role, ['admin', 'owner']);
     }
+
+    /* ==================== GRANULAR PERMISSIONS ==================== */
+
+    public function managePermissions(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'manage_permissions');
+    }
+
+    public function editProfile(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'edit_org_profile');
+    }
+
+    public function manageSettings(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'manage_org_settings');
+    }
+
+    public function uploadLogo(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'upload_org_logo');
+    }
+
+    public function manageInviteCodes(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'manage_invite_codes');
+    }
+
+    public function approveJoinRequests(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'approve_join_requests');
+    }
+
+    public function manageMemberRoles(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'manage_member_roles');
+    }
+
+    public function removeMembers(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'remove_members');
+    }
+
+    public function createAnnouncements(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'create_announcements');
+    }
+
+    public function editAnnouncements(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'edit_announcements');
+    }
+
+    public function deleteAnnouncements(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'delete_announcements');
+    }
+
+    public function viewStatistics(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'view_statistics');
+    }
+
+    public function viewActivityLogs(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'view_activity_logs');
+    }
+
+    public function exportData(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'export_data');
+    }
+
+    public function archive(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'archive_organization');
+    }
+
+    public function transferOwnership(User $user, Organization $organization): bool
+    {
+        return $user->hasPermission($organization->id, 'transfer_ownership');
+    }
 }

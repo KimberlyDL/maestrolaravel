@@ -518,72 +518,121 @@ Route::middleware(['auth:api'])->group(function () {
         /** =============================================================== */
 
         #region Storage
-        // View Access (Viewer Role)
+
+        // View Access: Allow Viewers, Contributors, OR Managers
         Route::get('/storage', [StorageController::class, 'index'])
-            ->middleware('org.permission:view_storage');
-        Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
-            ->middleware('org.permission:view_storage');
-        Route::get('/storage/documents/{document}/versions/{version}/download-url', [DocumentController::class, 'getDownloadUrl'])
-            ->middleware('org.permission:view_storage');
+            ->middleware('org.permission:view_storage|contribute_to_storage|manage_storage_system');
 
-        // Contribution Access (Contributor Role)
-        // Note: 'contribute_to_storage' replaces 'upload_documents' and 'create_folders'
+        Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
+            ->middleware('org.permission:view_storage|contribute_to_storage|manage_storage_system');
+
+        Route::get('/storage/documents/{document}/versions/{version}/download-url', [DocumentController::class, 'getDownloadUrl'])
+            ->middleware('org.permission:view_storage|contribute_to_storage|manage_storage_system');
+
+        // Contribution Access: Allow Contributors OR Managers
         Route::post('/storage/folders', [StorageController::class, 'createFolder'])
-            ->middleware('org.permission:contribute_to_storage');
+            ->middleware('org.permission:contribute_to_storage|manage_storage_system');
+
         Route::post('/storage/upload', [StorageController::class, 'upload'])
-            ->middleware('org.permission:contribute_to_storage');
+            ->middleware('org.permission:contribute_to_storage|manage_storage_system');
+
         Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
-            ->middleware('org.permission:contribute_to_storage');
+            ->middleware('org.permission:contribute_to_storage|manage_storage_system');
+
         Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
-            ->middleware('org.permission:contribute_to_storage');
+            ->middleware('org.permission:contribute_to_storage|manage_storage_system');
 
-        // Delete: The controller logic likely checks if the user owns the document. 
-        // If they own it, 'contribute_to_storage' is enough. 
-        // If they don't own it, they need 'manage_storage_system' (Admin).
+        // Delete: Allow Contributors OR Managers
+        // (Controller policy will restrict Contributors to their own files, while Managers can delete all)
         Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
-            ->middleware('org.permission:contribute_to_storage');
+            ->middleware('org.permission:contribute_to_storage|manage_storage_system');
 
-        // Sharing: Contributors can share their own files
+        // Sharing: Allow Contributors OR Managers
         Route::post('/storage/documents/{document}/toggle-share', [DocumentShareController::class, 'toggleShare'])
-            ->middleware('org.permission:contribute_to_storage');
+            ->middleware('org.permission:contribute_to_storage|manage_storage_system');
+
         Route::get('/storage/documents/{document}/share-status', [DocumentShareController::class, 'getShareStatus'])
-            ->middleware('org.permission:view_storage');
+            ->middleware('org.permission:view_storage|contribute_to_storage|manage_storage_system');
 
-        // // Admin Access (Co-admin Role)
-        // Route::get('/storage/statistics', [StorageController::class, 'statistics'])
-        //     ->middleware('org.permission:manage_storage_system');
-
-
-        // // Storage Access (Index, Stats)
-        // Route::get('/storage/statistics', [StorageController::class, 'statistics'])
-        //     ->middleware('org.permission:view_statistics');
-
+        // Statistics: All levels can view basic stats
         Route::get('/storage/statistics', [StorageController::class, 'statistics'])
-            ->middleware('org.permission:view_storage');
+            ->middleware('org.permission:view_storage|contribute_to_storage|manage_storage_system');
+        #endregion
 
-        // Storage Management (Create, Upload)
-        Route::post('/storage/folders', [StorageController::class, 'createFolder'])
-            ->middleware('org.permission:create_folders');
 
-        // Single Document Operations
-        Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
-            ->middleware('org.permission:view_storage');
-        Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
-            ->middleware('org.permission:upload_documents');
-        Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
-            ->middleware('org.permission:delete_documents');
 
-        // SIMPLIFIED SHARING - Just toggle public/org
-        Route::post('/storage/documents/{document}/toggle-share', [DocumentShareController::class, 'toggleShare'])
-            ->middleware('org.permission:upload_documents'); // Uploader can share
-        Route::get('/storage/documents/{document}/share-status', [DocumentShareController::class, 'getShareStatus'])
-            ->middleware('org.permission:view_storage');
+        // // View Access (Viewer Role)
+        // Route::get('/storage', [StorageController::class, 'index'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::get('/storage/documents/{document}/versions/{version}/download-url', [DocumentController::class, 'getDownloadUrl'])
+        //     ->middleware('org.permission:view_storage');
 
-        // Storage Document Versions (Download)
-        Route::get('/storage/documents/{document}/versions/{version}/download-url', [DocumentController::class, 'getDownloadUrl'])
-            ->middleware('org.permission:view_storage');
-        Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
-            ->middleware('org.permission:upload_documents');
+        // // Contribution Access (Contributor Role)
+        // // Note: 'contribute_to_storage' replaces 'upload_documents' and 'create_folders'
+        // Route::post('/storage/folders', [StorageController::class, 'createFolder'])
+        //     ->middleware('org.permission:contribute_to_storage');
+        // Route::post('/storage/upload', [StorageController::class, 'upload'])
+        //     ->middleware('org.permission:contribute_to_storage');
+        // Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
+        //     ->middleware('org.permission:contribute_to_storage');
+        // Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
+        //     ->middleware('org.permission:contribute_to_storage');
+
+        // // Delete: The controller logic likely checks if the user owns the document. 
+        // // If they own it, 'contribute_to_storage' is enough. 
+        // // If they don't own it, they need 'manage_storage_system' (Admin).
+        // Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
+        //     ->middleware('org.permission:contribute_to_storage');
+
+        // // Sharing: Contributors can share their own files
+        // Route::post('/storage/documents/{document}/toggle-share', [DocumentShareController::class, 'toggleShare'])
+        //     ->middleware('org.permission:contribute_to_storage');
+        // Route::get('/storage/documents/{document}/share-status', [DocumentShareController::class, 'getShareStatus'])
+        //     ->middleware('org.permission:view_storage');
+
+        // // // Admin Access (Co-admin Role)
+        // // Route::get('/storage/statistics', [StorageController::class, 'statistics'])
+        // //     ->middleware('org.permission:manage_storage_system');
+
+
+        // // // Storage Access (Index, Stats)
+        // // Route::get('/storage/statistics', [StorageController::class, 'statistics'])
+        // //     ->middleware('org.permission:view_statistics');
+
+        // Route::get('/storage/statistics', [StorageController::class, 'statistics'])
+        //     ->middleware('org.permission:view_storage');
+
+
+
+
+
+
+        // // Storage Management (Create, Upload)
+        // Route::post('/storage/folders', [StorageController::class, 'createFolder'])
+        //     ->middleware('org.permission:create_folders');
+
+
+        // // Single Document Operations
+        // Route::get('/storage/documents/{document}', [StorageController::class, 'show'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::patch('/storage/documents/{document}', [StorageController::class, 'update'])
+        //     ->middleware('org.permission:upload_documents');
+        // Route::delete('/storage/documents/{document}', [StorageController::class, 'destroy'])
+        //     ->middleware('org.permission:delete_documents');
+
+        // // SIMPLIFIED SHARING - Just toggle public/org
+        // Route::post('/storage/documents/{document}/toggle-share', [DocumentShareController::class, 'toggleShare'])
+        //     ->middleware('org.permission:upload_documents'); // Uploader can share
+        // Route::get('/storage/documents/{document}/share-status', [DocumentShareController::class, 'getShareStatus'])
+        //     ->middleware('org.permission:view_storage');
+
+        // // Storage Document Versions (Download)
+        // Route::get('/storage/documents/{document}/versions/{version}/download-url', [DocumentController::class, 'getDownloadUrl'])
+        //     ->middleware('org.permission:view_storage');
+        // Route::post('/storage/documents/{document}/versions', [DocumentController::class, 'addVersion'])
+        //     ->middleware('org.permission:upload_documents');
 
 
         #region New Version

@@ -34,6 +34,68 @@ class CheckOrgPermission
      * @param  string  $permission  The permission name to check
      * @return \Symfony\Component\HttpFoundation\Response
      */
+    // public function handle(Request $request, Closure $next, string $permission): Response
+    // {
+    //     $user = $request->user();
+
+    //     if (!$user) {
+    //         return response()->json(['message' => 'Unauthenticated'], 401);
+    //     }
+
+    //     $organization = $request->route('organization');
+
+    //     if (!$organization) {
+    //         return response()->json(['message' => 'Organization not found in route'], 400);
+    //     }
+
+    //     // Ensure we have Organization model instance
+    //     if (!$organization instanceof Organization) {
+    //         $organization = Organization::find($organization);
+
+    //         if (!$organization) {
+    //             return response()->json(['message' => 'Organization not found'], 404);
+    //         }
+    //     }
+
+    //     // Check if user is a member using Eloquent
+    //     if (!$organization->hasMember($user->id)) {
+    //         return response()->json([
+    //             'message' => 'You are not a member of this organization'
+    //         ], 403);
+    //     }
+
+    //     // Get user's role using Eloquent
+    //     $userRole = $organization->getUserRole($user->id);
+
+    //     // RULE 1: Admins have ALL permissions
+    //     if (in_array($userRole, ['admin', 'owner'])) {
+    //         return $next($request);
+    //     }
+
+    //     // RULE 2: Check implicit member permissions
+    //     if (in_array($permission, self::IMPLICIT_MEMBER_PERMISSIONS)) {
+    //         return $next($request);
+    //     }
+
+    //     // RULE 3: Check explicit permissions using Eloquent
+    //     $hasPermission = $user->hasPermission($organization->id, $permission);
+
+    //     if (!$hasPermission) {
+    //         return response()->json([
+    //             'message' => 'You do not have permission to perform this action',
+    //             'required_permission' => $permission,
+    //             'your_role' => $userRole,
+    //         ], 403);
+    //     }
+
+    //     return $next($request);
+    // }
+
+
+    /**
+     * Handle an incoming request.
+     * Supports multiple permissions separated by '|' (OR logic)
+     */
     public function handle(Request $request, Closure $next, string $permission): Response
     {
         $user = $request->user();
@@ -48,46 +110,47 @@ class CheckOrgPermission
             return response()->json(['message' => 'Organization not found in route'], 400);
         }
 
-        // Ensure we have Organization model instance
         if (!$organization instanceof Organization) {
             $organization = Organization::find($organization);
-
             if (!$organization) {
                 return response()->json(['message' => 'Organization not found'], 404);
             }
         }
 
-        // Check if user is a member using Eloquent
+        // Check membership
         if (!$organization->hasMember($user->id)) {
             return response()->json([
                 'message' => 'You are not a member of this organization'
             ], 403);
         }
 
-        // Get user's role using Eloquent
         $userRole = $organization->getUserRole($user->id);
 
-        // RULE 1: Admins have ALL permissions
+        // RULE 1: Admins/Owners have ALL permissions
         if (in_array($userRole, ['admin', 'owner'])) {
             return $next($request);
         }
 
+        // Parse permissions (Handle pipe '|' for OR logic)
+        $requiredPermissions = explode('|', $permission);
+
         // RULE 2: Check implicit member permissions
-        if (in_array($permission, self::IMPLICIT_MEMBER_PERMISSIONS)) {
-            return $next($request);
+        foreach ($requiredPermissions as $perm) {
+            if (in_array($perm, self::IMPLICIT_MEMBER_PERMISSIONS)) {
+                return $next($request);
+            }
         }
 
         // RULE 3: Check explicit permissions using Eloquent
-        $hasPermission = $user->hasPermission($organization->id, $permission);
-
-        if (!$hasPermission) {
-            return response()->json([
-                'message' => 'You do not have permission to perform this action',
-                'required_permission' => $permission,
-                'your_role' => $userRole,
-            ], 403);
+        // User needs to have ANY of the required permissions
+        if ($user->hasAnyPermission($organization->id, $requiredPermissions)) {
+            return $next($request);
         }
 
-        return $next($request);
+        return response()->json([
+            'message' => 'You do not have permission to perform this action',
+            'required_permissions' => $requiredPermissions,
+            'your_role' => $userRole,
+        ], 403);
     }
 }

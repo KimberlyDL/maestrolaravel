@@ -21,7 +21,8 @@ class StorageController extends Controller
      */
     public function index(Request $request)
     {
-        $orgId = $request->input('organization_id');
+        // Handle route param or query param
+        $orgId = $request->route('organization') ?? $request->input('organization_id');
         $folderId = $request->input('folder_id');
         $search = $request->input('q');
         $type = $request->input('type');
@@ -65,7 +66,6 @@ class StorageController extends Controller
 
         $documents = $query->paginate(50);
 
-        // Add file extensions and share status
         $documents->getCollection()->transform(function ($doc) {
             $doc->file_extension = $doc->getFileExtension();
             $doc->is_shared_public = $doc->visibility === 'public';
@@ -92,20 +92,16 @@ class StorageController extends Controller
         ]);
     }
 
-    /**
-     * [FIX] Missing method for Shared Documents Panel
-     * List all publicly shared documents across all organizations
-     */
     public function publicIndex(Request $request)
     {
-        $search = $request->input('q'); // Matches 'searchQuery' from frontend
+        $search = $request->input('q');
         $perPage = $request->input('per_page', 50);
 
         $query = Document::where('visibility', 'public')
-            ->where('context', 'storage') // Only storage files, not review attachments
+            ->where('context', 'storage')
             ->with([
                 'uploader:id,name,email',
-                'organization:id,name,logo', // Need org info for the card
+                'organization:id,name,logo',
                 'latestVersion:id,document_id,version_number,created_at,file_path'
             ]);
 
@@ -120,10 +116,8 @@ class StorageController extends Controller
         }
 
         $query->latest();
-
         $documents = $query->paginate($perPage);
 
-        // Transform for consistency
         $documents->getCollection()->transform(function ($doc) {
             $doc->file_extension = $doc->getFileExtension();
             return $doc;
@@ -132,9 +126,6 @@ class StorageController extends Controller
         return response()->json($documents);
     }
 
-    /**
-     * Create a new folder
-     */
     public function createFolder(Request $request)
     {
         $data = $request->validate([
@@ -177,9 +168,6 @@ class StorageController extends Controller
         return response()->json($folder->load('parent'), 201);
     }
 
-    /**
-     * Upload document to storage
-     */
     public function upload(Request $request)
     {
         $data = $request->validate([
@@ -229,10 +217,7 @@ class StorageController extends Controller
             'document_uploaded',
             Document::class,
             $document->id,
-            [
-                'document_name' => $document->title,
-                'file_size' => $document->file_size,
-            ],
+            ['document_name' => $document->title],
             auth()->user()->name . " uploaded: {$document->title}"
         );
 
@@ -244,9 +229,10 @@ class StorageController extends Controller
     }
 
     /**
-     * Update document/folder details
+     * Update document/folder (Rename/Move)
+     * FIX: Added $organization param to match route definition
      */
-    public function update(Request $request, Document $document)
+    public function update(Request $request, $organization, Document $document)
     {
         $this->authorize('updateStorage', $document);
 
@@ -260,7 +246,6 @@ class StorageController extends Controller
             if ($data['parent_id'] === $document->id) {
                 return response()->json(['message' => 'Cannot move folder into itself'], 400);
             }
-
             $parent = Document::find($data['parent_id']);
             if ($parent && $this->isDescendant($document->id, $parent)) {
                 return response()->json(['message' => 'Cannot move folder into its own subfolder'], 400);
@@ -284,9 +269,21 @@ class StorageController extends Controller
 
     /**
      * Delete document/folder
+     * FIX: Accepts $organization string and $id string to bypass implicit model binding errors
+     * This allows Admins to delete files they don't own without 404s
      */
-    public function destroy(Document $document)
+    public function destroy($organization, string $id)
     {
+        // Manual lookup to handle "Not Found" gracefully and ignore ownership scopes
+        $document = Document::where('id', $id)
+            ->where('organization_id', $organization)
+            ->first();
+
+        if (!$document) {
+            return response()->json(['message' => 'Document not found'], 404);
+        }
+
+        // Policy check will allow 'manage_storage_system' to pass
         $this->authorize('deleteStorage', $document);
 
         $title = $document->title;
@@ -298,10 +295,11 @@ class StorageController extends Controller
                 $this->deleteFolder($document);
             } else {
                 foreach ($document->versions as $version) {
-                    Storage::delete($version->file_path);
+                    if (Storage::exists($version->file_path)) {
+                        Storage::delete($version->file_path);
+                    }
                 }
             }
-
             $document->delete();
         });
 
@@ -318,9 +316,10 @@ class StorageController extends Controller
     }
 
     /**
-     * Get document/folder details
+     * Show details
+     * FIX: Added $organization param
      */
-    public function show(Document $document)
+    public function show($organization, Document $document)
     {
         $this->authorize('viewStorage', [Document::class, $document->organization_id]);
 
@@ -328,14 +327,7 @@ class StorageController extends Controller
             return response()->json(['message' => 'Not a storage document'], 400);
         }
 
-        $document->load([
-            'uploader',
-            'organization',
-            'parent',
-            'versions',
-            'latestVersion',
-        ]);
-
+        $document->load(['uploader', 'organization', 'parent', 'versions', 'latestVersion']);
         $document->file_extension = $document->getFileExtension();
         $document->is_shared_public = $document->visibility === 'public';
 
@@ -343,11 +335,13 @@ class StorageController extends Controller
     }
 
     /**
-     * Get storage statistics
+     * Storage Statistics
+     * FIX: Added $organization param
      */
-    public function statistics(Request $request)
+    public function statistics(Request $request, $organization)
     {
-        $orgId = $request->input('organization_id');
+        // Route param is passed as $organization argument
+        $orgId = $organization;
 
         if (!$orgId) {
             return response()->json(['message' => 'organization_id required'], 400);
@@ -371,7 +365,7 @@ class StorageController extends Controller
             'total_folders' => $stats->total_folders ?? 0,
             'total_files' => $stats->total_files ?? 0,
             'public_files' => $stats->public_files ?? 0,
-            'total_size' => $stats->total_size ?? 0,
+            'total_size' => (int)($stats->total_size ?? 0),
             'total_size_formatted' => $this->formatBytes($stats->total_size ?? 0),
         ]);
     }
@@ -387,7 +381,9 @@ class StorageController extends Controller
                 $this->deleteFolder($child);
             } else {
                 foreach ($child->versions as $version) {
-                    Storage::delete($version->file_path);
+                    if (Storage::exists($version->file_path)) {
+                        Storage::delete($version->file_path);
+                    }
                 }
             }
             $child->delete();
@@ -398,9 +394,7 @@ class StorageController extends Controller
     {
         $current = $document;
         while ($current) {
-            if ($current->id === $ancestorId) {
-                return true;
-            }
+            if ($current->id === $ancestorId) return true;
             $current = $current->parent;
         }
         return false;
