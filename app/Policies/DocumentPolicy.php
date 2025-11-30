@@ -62,92 +62,181 @@ class DocumentPolicy
     /* ==================== STORAGE CONTEXT ==================== */
 
     /**
-     * View storage documents in organization
+     * View storage documents/stats in organization
+     * Permission: view_storage
      */
     public function viewStorage(User $user, int $organizationId): bool
     {
-        return $user->organizations()->where('organizations.id', $organizationId)->exists();
+        // Check for 'view_storage' or 'manage_storage_system' or 'contribute_to_storage'
+        // Since contribute implies viewing, we check broadly.
+        // However, strictly adhering to your seeder:
+        return $user->hasAnyPermission($organizationId, [
+            'view_storage',
+            'contribute_to_storage',
+            'manage_storage_system'
+        ]);
     }
 
     /**
-     * Upload to organization storage
+     * Upload to organization storage / Create folders
+     * Permission: contribute_to_storage
      */
     public function uploadToStorage(User $user, int $organizationId): bool
     {
-        // All org members can upload
-        return $user->organizations()->where('organizations.id', $organizationId)->exists();
+        return $user->hasAnyPermission($organizationId, [
+            'contribute_to_storage',
+            'manage_storage_system'
+        ]);
     }
 
     /**
      * Update storage document/folder
+     * Permission: contribute_to_storage (own files) OR manage_storage_system (all)
      */
     public function updateStorage(User $user, Document $document): bool
     {
-        if ($document->context !== 'storage') {
-            return false;
-        }
+        if ($document->context !== 'storage') return false;
 
-        // Owner can edit
-        if ($document->uploaded_by === $user->id || $document->created_by === $user->id) {
+        // Admin/Manager can edit anything
+        if ($user->hasPermission($document->organization_id, 'manage_storage_system')) {
             return true;
         }
 
-        // Org admins can edit
-        $userRole = $document->organization->getUserRole($user->id);
-        return in_array($userRole, ['admin', 'owner']);
+        // Contributors can edit their own files
+        if ($document->uploaded_by === $user->id) {
+            return $user->hasPermission($document->organization_id, 'contribute_to_storage');
+        }
+
+        return false;
     }
 
     /**
      * Delete storage document/folder
+     * Permission: contribute_to_storage (own files) OR manage_storage_system (all)
      */
     public function deleteStorage(User $user, Document $document): bool
     {
-        if ($document->context !== 'storage') {
-            return false;
-        }
+        if ($document->context !== 'storage') return false;
 
-        // Owner can delete
-        if ($document->uploaded_by === $user->id) {
+        // Admin/Manager can delete anything
+        if ($user->hasPermission($document->organization_id, 'manage_storage_system')) {
             return true;
         }
 
-        // Org admins can delete
-        $userRole = $document->organization->getUserRole($user->id);
-        return in_array($userRole, ['admin', 'owner']);
+        // Contributors can delete their own files
+        if ($document->uploaded_by === $user->id) {
+            return $user->hasPermission($document->organization_id, 'contribute_to_storage');
+        }
+
+        return false;
     }
 
     /**
-     * Share document - owner or org members with permission
+     * Share document
+     * Permission: contribute_to_storage (own files) OR manage_storage_system (all)
      */
     public function share(User $user, Document $document): bool
     {
-        // Must be storage context
-        if ($document->context !== 'storage') {
-            return false;
-        }
+        if ($document->context !== 'storage') return false;
 
-        // Document owner can always share
-        if ($document->uploaded_by === $user->id || $document->created_by === $user->id) {
+        if ($user->hasPermission($document->organization_id, 'manage_storage_system')) {
             return true;
         }
 
-        // Check if user is org member with manage_document_sharing permission
-        $isMember = $user->organizations()->where('organizations.id', $document->organization_id)->exists();
-
-        if (!$isMember) {
-            return false;
+        if ($document->uploaded_by === $user->id) {
+            return $user->hasPermission($document->organization_id, 'contribute_to_storage');
         }
 
-        // Get user role to check if admin (admins can share any document)
-        $userRole = $document->organization->getUserRole($user->id);
-        if (in_array($userRole, ['admin', 'owner'])) {
-            return true;
-        }
-
-        // Otherwise, check explicit permission (if permission system is being used)
-        // This will fall through to permission middleware check
         return false;
     }
+
+    // /**
+    //  * View storage documents in organization
+    //  */
+    // public function viewStorage(User $user, int $organizationId): bool
+    // {
+    //     return $user->organizations()->where('organizations.id', $organizationId)->exists();
+    // }
+
+    // /**
+    //  * Upload to organization storage
+    //  */
+    // public function uploadToStorage(User $user, int $organizationId): bool
+    // {
+    //     // All org members can upload
+    //     return $user->organizations()->where('organizations.id', $organizationId)->exists();
+    // }
+
+    // /**
+    //  * Update storage document/folder
+    //  */
+    // public function updateStorage(User $user, Document $document): bool
+    // {
+    //     if ($document->context !== 'storage') {
+    //         return false;
+    //     }
+
+    //     // Owner can edit
+    //     if ($document->uploaded_by === $user->id || $document->created_by === $user->id) {
+    //         return true;
+    //     }
+
+    //     // Org admins can edit
+    //     $userRole = $document->organization->getUserRole($user->id);
+    //     return in_array($userRole, ['admin', 'owner']);
+    // }
+
+    // /**
+    //  * Delete storage document/folder
+    //  */
+    // public function deleteStorage(User $user, Document $document): bool
+    // {
+    //     if ($document->context !== 'storage') {
+    //         return false;
+    //     }
+
+    //     // Owner can delete
+    //     if ($document->uploaded_by === $user->id) {
+    //         return true;
+    //     }
+
+    //     // Org admins can delete
+    //     $userRole = $document->organization->getUserRole($user->id);
+    //     return in_array($userRole, ['admin', 'owner']);
+    // }
+
+    // /**
+    //  * Share document - owner or org members with permission
+    //  */
+    // public function share(User $user, Document $document): bool
+    // {
+    //     // Must be storage context
+    //     if ($document->context !== 'storage') {
+    //         return false;
+    //     }
+
+    //     // Document owner can always share
+    //     if ($document->uploaded_by === $user->id || $document->created_by === $user->id) {
+    //         return true;
+    //     }
+
+    //     // Check if user is org member with manage_document_sharing permission
+    //     $isMember = $user->organizations()->where('organizations.id', $document->organization_id)->exists();
+
+    //     if (!$isMember) {
+    //         return false;
+    //     }
+
+    //     // Get user role to check if admin (admins can share any document)
+    //     $userRole = $document->organization->getUserRole($user->id);
+    //     if (in_array($userRole, ['admin', 'owner'])) {
+    //         return true;
+    //     }
+
+    //     // Otherwise, check explicit permission (if permission system is being used)
+    //     // This will fall through to permission middleware check
+    //     return false;
+    // }
 
     /**
      * Update document sharing settings
@@ -188,38 +277,38 @@ class DocumentPolicy
 
     //inayos ko
     #region inayos ko
-    public function viewAny(User $user)
-    {
-        // Any of the 3 levels can view
-        return $user->hasAnyPermission(['storage.view', 'storage.contribute', 'storage.manage']);
-    }
+    // public function viewAny(User $user)
+    // {
+    //     // Any of the 3 levels can view
+    //     return $user->hasAnyPermission(['storage.view', 'storage.contribute', 'storage.manage']);
+    // }
 
-    public function create(User $user)
-    {
-        // "Contribute" or "Manage" can upload
-        return $user->hasAnyPermission(['storage.contribute', 'storage.manage']);
-    }
+    // public function create(User $user)
+    // {
+    //     // "Contribute" or "Manage" can upload
+    //     return $user->hasAnyPermission(['storage.contribute', 'storage.manage']);
+    // }
 
-    public function delete(User $user, Document $document)
-    {
-        // "Manage" can delete ANYTHING
-        if ($user->hasPermissionTo('storage.manage')) {
-            return true;
-        }
+    // public function delete(User $user, Document $document)
+    // {
+    //     // "Manage" can delete ANYTHING
+    //     if ($user->hasPermissionTo('storage.manage')) {
+    //         return true;
+    //     }
 
-        // "Contribute" can only delete THEIR OWN files
-        if ($user->hasPermissionTo('storage.contribute') && $document->user_id === $user->id) {
-            return true;
-        }
+    //     // "Contribute" can only delete THEIR OWN files
+    //     if ($user->hasPermissionTo('storage.contribute') && $document->user_id === $user->id) {
+    //         return true;
+    //     }
 
-        return false;
-    }
+    //     return false;
+    // }
 
-    public function share(User $user)
-    {
-        // "Contribute" or "Manage" can share
-        return $user->hasAnyPermission(['storage.contribute', 'storage.manage']);
-    }
+    // public function share(User $user)
+    // {
+    //     // "Contribute" or "Manage" can share
+    //     return $user->hasAnyPermission(['storage.contribute', 'storage.manage']);
+    // }
     #endregion
 
 }
