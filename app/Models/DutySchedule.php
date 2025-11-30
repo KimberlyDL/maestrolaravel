@@ -65,7 +65,7 @@ class DutySchedule extends Model
     public function getAssignedCountAttribute(): int
     {
         return $this->assignments()
-            ->whereIn('status', ['assigned', 'confirmed'])
+            ->whereIn('status', ['assigned', 'confirmed', 'complete', 'no-show'])
             ->count();
     }
 
