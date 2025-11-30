@@ -144,76 +144,157 @@ class Document extends Model
             && $this->published_at->isPast();
     }
 
+    // /**
+    //  * Check if user can edit this document
+    //  * Only uploader or org admin can edit
+    //  */
+    // public function canEdit(?int $userId = null): bool
+    // {
+    //     $userId = $userId ?? auth()->id();
+    //     if (!$userId) return false;
+
+    //     // Creator can always edit
+    //     if ($this->uploaded_by === $userId || $this->created_by === $userId) {
+    //         return true;
+    //     }
+
+    //     // Org admins can edit
+    //     $org = $this->organization;
+    //     if (!$org) return false;
+
+    //     $userRole = $org->getUserRole($userId);
+    //     return in_array($userRole, ['admin', 'owner']);
+    // }
+
+    // /**
+    //  * Check if user can delete this document
+    //  * Uploader OR admin with delete_documents permission
+    //  */
+    // public function canDelete(?int $userId = null): bool
+    // {
+    //     $userId = $userId ?? auth()->id();
+    //     if (!$userId) return false;
+
+    //     // Uploader can delete their own uploads
+    //     if ($this->uploaded_by === $userId) {
+    //         return true;
+    //     }
+
+    //     // Check admin permission
+    //     $org = $this->organization;
+    //     if (!$org) return false;
+
+    //     $userRole = $org->getUserRole($userId);
+    //     if (in_array($userRole, ['admin', 'owner'])) {
+    //         return true;
+    //     }
+
+    //     // Check explicit admin delete permission
+    //     $user = \App\Models\User::find($userId);
+    //     return $user && $user->hasPermission($this->organization_id, 'admin_delete_documents');
+    // }
+
+    // /**
+    //  * Check if user can share this document
+    //  * Only uploader can share (unless admin)
+    //  */
+    // public function canShare(?int $userId = null): bool
+    // {
+    //     $userId = $userId ?? auth()->id();
+    //     if (!$userId) return false;
+
+    //     // Uploader can share
+    //     if ($this->uploaded_by === $userId) {
+    //         return true;
+    //     }
+
+    //     // Org admins can share
+    //     $org = $this->organization;
+    //     if (!$org) return false;
+
+    //     $userRole = $org->getUserRole($userId);
+    //     return in_array($userRole, ['admin', 'owner']);
+    // }
+
     /**
      * Check if user can edit this document
-     * Only uploader or org admin can edit
+     * FIXED: Checks for manage_storage_system OR contribute_to_storage (if owner)
      */
     public function canEdit(?int $userId = null): bool
     {
         $userId = $userId ?? auth()->id();
         if (!$userId) return false;
 
-        // Creator can always edit
-        if ($this->uploaded_by === $userId || $this->created_by === $userId) {
+        $user = User::find($userId);
+        if (!$user) return false;
+
+        if (!$this->organization_id) return false;
+
+        // 1. Managers/Admins can edit anything
+        if ($user->hasPermission($this->organization_id, 'manage_storage_system')) {
             return true;
         }
 
-        // Org admins can edit
-        $org = $this->organization;
-        if (!$org) return false;
+        // 2. Creator/Uploader can edit their own files IF they have contribute permission
+        if ($this->uploaded_by === $userId || $this->created_by === $userId) {
+            return $user->hasPermission($this->organization_id, 'contribute_to_storage');
+        }
 
-        $userRole = $org->getUserRole($userId);
-        return in_array($userRole, ['admin', 'owner']);
+        return false;
     }
 
     /**
      * Check if user can delete this document
-     * Uploader OR admin with delete_documents permission
+     * FIXED: Checks for manage_storage_system OR contribute_to_storage (if owner)
      */
     public function canDelete(?int $userId = null): bool
     {
         $userId = $userId ?? auth()->id();
         if (!$userId) return false;
 
-        // Uploader can delete their own uploads
+        $user = User::find($userId);
+        if (!$user) return false;
+
+        if (!$this->organization_id) return false;
+
+        // 1. Managers/Admins can delete anything
+        if ($user->hasPermission($this->organization_id, 'manage_storage_system')) {
+            return true;
+        }
+
+        // 2. Uploader can delete their own files IF they have contribute permission
         if ($this->uploaded_by === $userId) {
-            return true;
+            return $user->hasPermission($this->organization_id, 'contribute_to_storage');
         }
 
-        // Check admin permission
-        $org = $this->organization;
-        if (!$org) return false;
-
-        $userRole = $org->getUserRole($userId);
-        if (in_array($userRole, ['admin', 'owner'])) {
-            return true;
-        }
-
-        // Check explicit admin delete permission
-        $user = \App\Models\User::find($userId);
-        return $user && $user->hasPermission($this->organization_id, 'admin_delete_documents');
+        return false;
     }
 
     /**
      * Check if user can share this document
-     * Only uploader can share (unless admin)
+     * FIXED: Checks for manage_storage_system OR contribute_to_storage (if owner)
      */
     public function canShare(?int $userId = null): bool
     {
         $userId = $userId ?? auth()->id();
         if (!$userId) return false;
 
-        // Uploader can share
-        if ($this->uploaded_by === $userId) {
+        $user = User::find($userId);
+        if (!$user) return false;
+
+        if (!$this->organization_id) return false;
+
+        // 1. Managers/Admins can share anything
+        if ($user->hasPermission($this->organization_id, 'manage_storage_system')) {
             return true;
         }
 
-        // Org admins can share
-        $org = $this->organization;
-        if (!$org) return false;
+        // 2. Uploader can share their own files IF they have contribute permission
+        if ($this->uploaded_by === $userId) {
+            return $user->hasPermission($this->organization_id, 'contribute_to_storage');
+        }
 
-        $userRole = $org->getUserRole($userId);
-        return in_array($userRole, ['admin', 'owner']);
+        return false;
     }
 
     public function getFormattedSizeAttribute(): string

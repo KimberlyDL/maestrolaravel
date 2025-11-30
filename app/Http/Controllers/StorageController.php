@@ -16,6 +16,82 @@ class StorageController extends Controller
         private readonly UploadService $uploads
     ) {}
 
+    // /**
+    //  * List documents/folders in organization storage
+    //  */
+    // public function index(Request $request)
+    // {
+    //     // Handle route param or query param
+    //     $orgId = $request->route('organization') ?? $request->input('organization_id');
+    //     $folderId = $request->input('folder_id');
+    //     $search = $request->input('q');
+    //     $type = $request->input('type');
+
+    //     if (!$orgId) {
+    //         return response()->json(['message' => 'organization_id required'], 400);
+    //     }
+
+    //     $this->authorize('viewStorage', [Document::class, $orgId]);
+
+    //     $query = Document::forStorage()
+    //         ->where('organization_id', $orgId)
+    //         ->with([
+    //             'uploader:id,name,email,avatar,avatar_url',
+    //             'latestVersion:id,document_id,version_number,created_at,file_path',
+    //             'parent:id,title',
+    //             'organization:id,name'
+    //         ])
+    //         ->withCount('children');
+
+    //     if ($folderId) {
+    //         $query->where('parent_id', $folderId);
+    //     } else {
+    //         $query->rootLevel();
+    //     }
+
+    //     if ($type === 'folders') {
+    //         $query->foldersOnly();
+    //     } elseif ($type === 'files') {
+    //         $query->filesOnly();
+    //     }
+
+    //     if ($search) {
+    //         $query->where(function ($q) use ($search) {
+    //             $q->where('title', 'like', "%{$search}%")
+    //                 ->orWhere('description', 'like', "%{$search}%");
+    //         });
+    //     }
+
+    //     $query->orderByRaw('is_folder DESC, title ASC');
+
+    //     $documents = $query->paginate(50);
+
+    //     $documents->getCollection()->transform(function ($doc) {
+    //         $doc->file_extension = $doc->getFileExtension();
+    //         $doc->is_shared_public = $doc->visibility === 'public';
+    //         return $doc;
+    //     });
+
+    //     $breadcrumbs = [];
+    //     if ($folderId) {
+    //         $folder = Document::find($folderId);
+    //         if ($folder) {
+    //             $breadcrumbs = $folder->getBreadcrumbs();
+    //         }
+    //     }
+
+    //     return response()->json([
+    //         'data' => $documents->items(),
+    //         'meta' => [
+    //             'current_page' => $documents->currentPage(),
+    //             'last_page' => $documents->lastPage(),
+    //             'per_page' => $documents->perPage(),
+    //             'total' => $documents->total(),
+    //         ],
+    //         'breadcrumbs' => $breadcrumbs,
+    //     ]);
+    // }
+
     /**
      * List documents/folders in organization storage
      */
@@ -38,7 +114,8 @@ class StorageController extends Controller
             ->with([
                 'uploader:id,name,email,avatar,avatar_url',
                 'latestVersion:id,document_id,version_number,created_at,file_path',
-                'parent:id,title',
+                // FIX: Select necessary columns for permission checks on the parent folder
+                'parent:id,title,organization_id,uploaded_by,created_by',
                 'organization:id,name'
             ])
             ->withCount('children');
