@@ -55,91 +55,103 @@
 namespace App\Policies;
 
 use App\Models\{User, ReviewRequest, ReviewRecipient};
+use App\Enums\ReviewStatus;
 
 class ReviewRequestPolicy
 {
     /**
-     * SIMPLIFIED: Can user view this review?
-     * YES if: Submitter OR Recipient (in any organization)
+     * Can user view this review?
+     * YES if: Submitter OR Admin OR Recipient
      */
     public function view(User $user, ReviewRequest $review): bool
     {
-        // Submitter can always view
-        if ($review->submitted_by === $user->id) {
-            return true;
-        }
-        
-        // Recipient can view
-        return $review->recipients()
-            ->where('reviewer_user_id', $user->id)
-            ->exists();
+        if ($review->submitted_by === $user->id) return true;
+        if ($user->isOrgRole($review->publisher_org_id, ['admin', 'owner'])) return true;
+        return $review->recipients()->where('reviewer_user_id', $user->id)->exists();
     }
 
     /**
-     * SIMPLIFIED: Can user update/edit this review?
-     * YES if: Submitter OR Admin of publisher org
+     * Can user update/edit this review?
+     * YES if: Submitter OR Admin
+     * AND: Not rejected
+     * AND: Reviewers haven't responded yet
      */
     public function update(User $user, ReviewRequest $review): bool
     {
-        // Submitter can update (hierarchical - creator has full control)
-        if ($review->submitted_by === $user->id) {
-            return true;
+        // 1. Check Role
+        $canUpdate = ($review->submitted_by === $user->id) || 
+                     $user->isOrgRole($review->publisher_org_id, ['admin', 'owner']);
+
+        if (!$canUpdate) return false;
+
+        // 2. Lock if Rejected by Admin
+        if ($review->approval_status === 'rejected') {
+            return false;
         }
-        
-        // Admin of publisher org can update
-        return $review->publisher && $review->publisher->isUserAdmin($user->id);
+
+        // 3. Lock if any Reviewer has Approved/Declined
+        // We check if any recipient status is NOT pending or viewed (i.e., they made a decision)
+        $hasResponses = $review->recipients()
+            ->whereIn('status', ['approved', 'declined'])
+            ->exists();
+
+        if ($hasResponses) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
-     * SIMPLIFIED: Can user comment on this review?
-     * YES if: Can view the review (submitter or recipient)
+     * Can user delete this review?
+     * YES if: Submitter OR Admin
+     * AND: (Is Draft OR Is Rejected)
      */
+    public function delete(User $user, ReviewRequest $review): bool
+    {
+        $canDelete = ($review->submitted_by === $user->id) || 
+                     $user->isOrgRole($review->publisher_org_id, ['admin', 'owner']);
+
+        if (!$canDelete) return false;
+
+        // Allow delete if Draft
+        if ($review->status === ReviewStatus::Draft) return true;
+
+        // Allow delete if Rejected (even if status is Sent)
+        if ($review->approval_status === 'rejected') return true;
+
+        // Allow delete if Closed (optional, usually good for cleanup)
+        if ($review->status === ReviewStatus::Closed) return true;
+
+        return false;
+    }
+
     public function comment(User $user, ReviewRequest $review): bool
     {
         return $this->view($user, $review);
     }
 
-    /**
-     * SIMPLIFIED: Can user close this review?
-     * YES if: Submitter OR Admin of publisher org
-     */
     public function close(User $user, ReviewRequest $review): bool
     {
         return $this->update($user, $review);
     }
 
-    /**
-     * SIMPLIFIED: Can user reopen this review?
-     * YES if: Submitter OR Admin of publisher org
-     */
     public function reopen(User $user, ReviewRequest $review): bool
     {
         return $this->update($user, $review);
     }
 
-    /**
-     * SIMPLIFIED: Can user attach new version?
-     * YES if: Submitter OR Admin of publisher org
-     */
     public function attachVersion(User $user, ReviewRequest $review): bool
     {
         return $this->update($user, $review);
     }
 
-    /**
-     * SIMPLIFIED: Can user act as recipient (approve/decline)?
-     * YES if: User is THIS SPECIFIC recipient
-     */
     public function actAsRecipient(User $user, ReviewRequest $review, ReviewRecipient $recipient): bool
     {
         return $recipient->reviewer_user_id === $user->id && 
                $recipient->review_request_id === $review->id;
     }
 
-    /**
-     * SIMPLIFIED: Can user send reminder to recipient?
-     * YES if: Submitter OR Admin of publisher org
-     */
     public function remind(User $user, ReviewRequest $review, ReviewRecipient $recipient): bool
     {
         return $this->update($user, $review);

@@ -143,7 +143,7 @@ class ReviewRequest extends Model
                 'rejection_reason' => $reason,
                 'rejected_by' => $adminUserId,
                 'rejected_at' => now(),
-                'status' => ReviewStatus::Draft, // Reset to draft
+                // 'status' => ReviewStatus::Draft, // REMOVED: Do not reset to draft so it stays locked
             ]);
 
             $this->actions()->create([

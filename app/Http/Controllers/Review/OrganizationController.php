@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use App\Services\ActivityLogger;
 use App\Services\NotificationService;
+use Illuminate\Support\Facades\DB;
 
 class OrganizationController extends Controller
 {
@@ -119,39 +120,64 @@ class OrganizationController extends Controller
         return response()->json($requests);
     }
 
+    // /**
+    //  * Cancel a pending join request
+    //  */
+    // public function cancelRequest(Request $request, $requestId)
+    // {
+    //     $user = $request->user();
+
+    //     $joinRequest = \DB::table('organization_join_requests')
+    //         ->where('id', $requestId)
+    //         ->where('user_id', $user->id)
+    //         ->where('status', 'pending')
+    //         ->first();
+
+    //     if (!$joinRequest) {
+    //         return response()->json(['message' => 'Join request not found or already processed.'], 404);
+    //     }
+
+    //     \DB::table('organization_join_requests')
+    //         ->where('id', $requestId)
+    //         ->update([
+    //             'status' => 'cancelled',
+    //             'updated_at' => now(),
+    //         ]);
+
+    //     ActivityLogger::log(
+    //         $joinRequest->organization_id,
+    //         'join_request_cancelled',
+    //         subjectType: 'User',
+    //         subjectId: $user->id,
+    //         description: "{$user->name} cancelled their join request"
+    //     );
+
+    //     return response()->json(['message' => 'Join request cancelled successfully.']);
+    // }
+
+
     /**
      * Cancel a pending join request
      */
-    public function cancelRequest(Request $request, $requestId)
+    public function cancelRequest($requestId)
     {
-        $user = $request->user();
+        $userId = Auth::id();
 
-        $joinRequest = \DB::table('organization_join_requests')
+        $request = DB::table('organization_join_requests')
             ->where('id', $requestId)
-            ->where('user_id', $user->id)
+            ->where('user_id', $userId)
             ->where('status', 'pending')
             ->first();
 
-        if (!$joinRequest) {
-            return response()->json(['message' => 'Join request not found or already processed.'], 404);
+        if (!$request) {
+            return response()->json(['message' => 'Pending request not found'], 404);
         }
 
-        \DB::table('organization_join_requests')
-            ->where('id', $requestId)
-            ->update([
-                'status' => 'cancelled',
-                'updated_at' => now(),
-            ]);
+        // Hard delete the request to avoid unique constraint violations
+        // and keep the table clean.
+        DB::table('organization_join_requests')->where('id', $requestId)->delete();
 
-        ActivityLogger::log(
-            $joinRequest->organization_id,
-            'join_request_cancelled',
-            subjectType: 'User',
-            subjectId: $user->id,
-            description: "{$user->name} cancelled their join request"
-        );
-
-        return response()->json(['message' => 'Join request cancelled successfully.']);
+        return response()->json(['message' => 'Request cancelled successfully']);
     }
 
     /**
