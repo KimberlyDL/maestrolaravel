@@ -77,9 +77,9 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
     }
 
     public function notifications()
-{
-    return $this->hasMany(Notification::class);
-}
+    {
+        return $this->hasMany(Notification::class);
+    }
 
     // ========================================
     // Organization Relationships
@@ -146,7 +146,7 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
     /**
      * Check if user has specific permission in organization
      */
-    public function hasPermission(string $permission, int $organizationId): bool
+    public function hasPermission(int $organizationId, string $permission): bool
     {
         // Admins have all permissions
         $role = $this->roleInOrg($organizationId);

@@ -161,6 +161,7 @@ class DefaultPermissions
             'storage' => [
                 'view_storage',
                 'contribute_to_storage',
+                'manage_storage_system',
             ],
             'reviews' => [
                 'create_reviews',

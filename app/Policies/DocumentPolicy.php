@@ -184,6 +184,10 @@ class DocumentPolicy
     {
         return $this->share($user, $document);
     }
+
+
+    //inayos ko
+    #region inayos ko
     public function viewAny(User $user)
     {
         // Any of the 3 levels can view
@@ -216,5 +220,6 @@ class DocumentPolicy
         // "Contribute" or "Manage" can share
         return $user->hasAnyPermission(['storage.contribute', 'storage.manage']);
     }
+    #endregion
 
 }
