@@ -62,11 +62,42 @@ class DutySchedule extends Model
     /**
      * Get count of active assignments (assigned or confirmed)
      */
+    // public function getAssignedCountAttribute(): int
+    // {
+    //     return $this->assignments()
+    //         ->whereIn('status', ['assigned', 'confirmed', 'complete', 'no-show'])
+    //         ->count();
+    // }
+
+
     public function getAssignedCountAttribute(): int
     {
         return $this->assignments()
-            ->whereIn('status', ['assigned', 'confirmed', 'complete', 'no-show'])
+            ->whereIn('status', ['assigned', 'confirmed', 'completed', 'no_show']) // UPDATED
             ->count();
+    }
+
+    /**
+     * FIX 2: Format window times to H:i for frontend display, assuming DB stores H:i:s
+     */
+    public function getCheckInWindowStartAttribute(?string $value): ?string
+    {
+        return $value ? substr($value, 0, 5) : null;
+    }
+
+    public function getCheckInWindowEndAttribute(?string $value): ?string
+    {
+        return $value ? substr($value, 0, 5) : null;
+    }
+
+    public function getCheckOutWindowStartAttribute(?string $value): ?string
+    {
+        return $value ? substr($value, 0, 5) : null;
+    }
+
+    public function getCheckOutWindowEndAttribute(?string $value): ?string
+    {
+        return $value ? substr($value, 0, 5) : null;
     }
 
     // ===== Scopes =====

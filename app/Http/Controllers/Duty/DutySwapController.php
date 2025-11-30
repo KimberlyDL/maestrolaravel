@@ -9,6 +9,8 @@ use App\Models\Organization;
 use App\Services\NotificationService;
 use App\Services\ActivityLogger;
 use Illuminate\Http\Request;
+use App\Models\User; // Ensure User model is used
+use App\Models\OrganizationUser;
 
 class DutySwapController extends Controller
 {
@@ -54,6 +56,88 @@ class DutySwapController extends Controller
 
         return response()->json($swapRequests);
     }
+
+    // public function store(Request $request, Organization $organization, DutyAssignment $dutyAssignment)
+    // {
+    //     if ($dutyAssignment->officer_id !== auth()->id()) {
+    //         return response()->json(['message' => 'You can only request swaps for your own assignments'], 403);
+    //     }
+
+    //     if ($dutyAssignment->status !== 'confirmed') {
+    //         return response()->json(['message' => 'You can only swap confirmed assignments'], 400);
+    //     }
+
+    //     $dutyAssignment->load('dutySchedule');
+
+    //     $dutyDate = $dutyAssignment->dutySchedule->date;
+    //     if ($dutyDate < now()->toDateString()) {
+    //         return response()->json(['message' => 'Cannot swap past duties'], 400);
+    //     }
+
+    //     $existingSwap = DutySwapRequest::where('duty_assignment_id', $dutyAssignment->id)
+    //         ->whereIn('status', ['pending', 'approved'])
+    //         ->exists();
+
+    //     if ($existingSwap) {
+    //         return response()->json(['message' => 'There is already a pending swap request for this assignment'], 400);
+    //     }
+
+    //     $data = $request->validate([
+    //         'to_officer_id' => 'nullable|exists:users,id',
+    //         'reason' => 'required|string|max:1000',
+    //     ]);
+
+    //     if (!empty($data['to_officer_id'])) {
+    //         if ($data['to_officer_id'] == auth()->id()) {
+    //             return response()->json(['message' => 'You cannot swap with yourself'], 400);
+    //         }
+    //         if (!$organization->hasMember($data['to_officer_id'])) {
+    //             return response()->json(['message' => 'Target officer is not a member of this organization'], 400);
+    //         }
+    //     }
+
+    //     $swapRequest = DutySwapRequest::create([
+    //         'duty_assignment_id' => $dutyAssignment->id,
+    //         'from_officer_id' => auth()->id(),
+    //         'to_officer_id' => $data['to_officer_id'] ?? null,
+    //         'reason' => $data['reason'],
+    //         'status' => 'pending',
+    //     ]);
+
+    //     if ($swapRequest->to_officer_id) {
+    //         $this->notificationService->send(
+    //             $swapRequest->to_officer_id,
+    //             'Duty Swap Request',
+    //             auth()->user()->name . " wants to swap '{$dutyAssignment->dutySchedule->title}' with you.",
+    //             'duty.swap_requested',
+    //             $swapRequest,
+    //             "/org/{$organization->id}/duty/swaps",
+    //             'high',
+    //             $organization->id
+    //         );
+    //     }
+
+    //     ActivityLogger::log(
+    //         $organization->id,
+    //         'duty.swap.requested',
+    //         DutySwapRequest::class,
+    //         $swapRequest->id,
+    //         [
+    //             'duty_schedule_id' => $dutyAssignment->duty_schedule_id,
+    //             'duty_title' => $dutyAssignment->dutySchedule->title,
+    //             'from_officer' => auth()->user()->name,
+    //             'to_officer' => $data['to_officer_id'] ? \App\Models\User::find($data['to_officer_id'])->name : 'Anyone',
+    //             'duty_date' => $dutyAssignment->dutySchedule->date,
+    //         ],
+    //         auth()->user()->name . ' requested to swap duty: ' . $dutyAssignment->dutySchedule->title
+    //     );
+
+    //     return response()->json($swapRequest->load([
+    //         'fromOfficer',
+    //         'toOfficer',
+    //         'dutyAssignment.dutySchedule'
+    //     ]), 201);
+    // }
 
     public function store(Request $request, Organization $organization, DutyAssignment $dutyAssignment)
     {
@@ -102,17 +186,90 @@ class DutySwapController extends Controller
             'status' => 'pending',
         ]);
 
+        $fromOfficerName = auth()->user()->name;
+        $dutyTitle = $dutyAssignment->dutySchedule->title;
+        $organizationId = $organization->id;
+        $swapRequestUrl = "/org/{$organizationId}/duty/swaps";
+        $adminId = $organization->created_by; // Assuming the organization creator is the admin/manager
+
+        // --- NEW: Notification Logic based on request type ---
         if ($swapRequest->to_officer_id) {
+            // --- Targeted Swap: Notify Specific Officer and Admin ---
+            $toOfficer = User::find($swapRequest->to_officer_id);
+            $toOfficerName = $toOfficer->name;
+
+            // 1. Notify the specific target officer
             $this->notificationService->send(
                 $swapRequest->to_officer_id,
                 'Duty Swap Request',
-                auth()->user()->name . " wants to swap '{$dutyAssignment->dutySchedule->title}' with you.",
-                'duty.swap_requested',
+                "{$fromOfficerName} wants to swap '{$dutyTitle}' with you.",
+                'duty.swap_requested_targeted',
                 $swapRequest,
-                "/org/{$organization->id}/duty/swaps",
+                $swapRequestUrl,
                 'high',
-                $organization->id
+                $organizationId
             );
+
+            // 2. Notify the Admin/Manager (only if they aren't the target officer and not the requester)
+            if ($adminId && (int)$adminId !== (int)$swapRequest->to_officer_id && (int)$adminId !== (int)auth()->id()) {
+                $this->notificationService->send(
+                    $adminId,
+                    'New Targeted Duty Swap Request',
+                    "{$fromOfficerName} requested a swap with {$toOfficerName} for '{$dutyTitle}'.",
+                    'duty.swap_targeted_admin_alert',
+                    $swapRequest,
+                    $swapRequestUrl,
+                    'normal',
+                    $organizationId
+                );
+            }
+        } else {
+            // --- Open Swap (To Anyone): Notify All Officers and Admin ---
+
+            // 1. Fetch all user IDs associated with the organization, excluding the requester.
+            $allMemberIds = \App\Models\OrganizationUser::where('organization_id', $organizationId)
+                ->where('user_id', '!=', auth()->id())
+                ->pluck('user_id')
+                ->toArray();
+
+            $notificationTitle = 'New Open Duty Swap Available';
+            $notificationMessage = "{$fromOfficerName} posted an open swap for '{$dutyTitle}'. Tap to view.";
+
+            $adminNotificationSent = false;
+
+            foreach ($allMemberIds as $memberId) {
+                // Notify all members
+                $this->notificationService->send(
+                    $memberId,
+                    $notificationTitle,
+                    $notificationMessage,
+                    'duty.swap_open_available',
+                    $swapRequest,
+                    $swapRequestUrl,
+                    'normal',
+                    $organizationId
+                );
+
+                if ((int)$memberId === (int)$adminId) {
+                    $adminNotificationSent = true;
+                }
+            }
+
+            // 2. Notify the Admin/Manager specifically (if they weren't in the members list and are not the requester)
+            if ($adminId && !$adminNotificationSent && (int)$adminId !== (int)auth()->id()) {
+                $this->notificationService->send(
+                    $adminId,
+                    'New Open Duty Swap Posted (Admin Alert)',
+                    "{$fromOfficerName} posted an open swap for '{$dutyTitle}'. Review and reassign.",
+                    'duty.swap_open_admin_alert',
+                    $swapRequest,
+                    $swapRequestUrl,
+                    'high',
+                    $organizationId
+                );
+            }
+
+            $toOfficerName = 'Anyone'; // For Activity Log
         }
 
         ActivityLogger::log(
@@ -122,12 +279,12 @@ class DutySwapController extends Controller
             $swapRequest->id,
             [
                 'duty_schedule_id' => $dutyAssignment->duty_schedule_id,
-                'duty_title' => $dutyAssignment->dutySchedule->title,
-                'from_officer' => auth()->user()->name,
-                'to_officer' => $data['to_officer_id'] ? \App\Models\User::find($data['to_officer_id'])->name : 'Anyone',
+                'duty_title' => $dutyTitle,
+                'from_officer' => $fromOfficerName,
+                'to_officer' => $swapRequest->to_officer_id ? $toOfficerName : 'Anyone',
                 'duty_date' => $dutyAssignment->dutySchedule->date,
             ],
-            auth()->user()->name . ' requested to swap duty: ' . $dutyAssignment->dutySchedule->title
+            $fromOfficerName . ' requested to swap duty: ' . $dutyTitle
         );
 
         return response()->json($swapRequest->load([
@@ -136,7 +293,6 @@ class DutySwapController extends Controller
             'dutyAssignment.dutySchedule'
         ]), 201);
     }
-
     public function accept(Request $request, Organization $organization, DutySwapRequest $swapRequest)
     {
         $swapRequest->load(['dutyAssignment.dutySchedule', 'fromOfficer']);
@@ -285,7 +441,8 @@ class DutySwapController extends Controller
 
         if ($data['action'] === 'reject') {
             $swapRequest->update([
-                'status' => 'rejected',
+                // FIX: Changed 'rejected' to 'declined' to resolve the PDOException: Data truncated error.
+                'status' => 'declined',
                 'reviewed_by' => auth()->id(),
                 'reviewed_at' => now(),
                 'review_notes' => $data['review_notes'] ?? 'Rejected by admin - officer must attend',

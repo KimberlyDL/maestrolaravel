@@ -51,14 +51,28 @@ class DutyScheduleController extends Controller
             });
         }
 
+        //     $schedules = $query->orderBy('date', 'desc')
+        //         ->orderBy('start_time', 'asc')
+        //         ->get();
+
+        //     // Add assignment counts to each schedule
+        //     $schedules->each(function ($schedule) {
+        //         $schedule->assigned_count = $schedule->assignments
+        //             ->whereIn('status', ['assigned', 'confirmed', 'completed'])
+        //             ->count();
+        //     });
+
+        //     return response()->json($schedules);
+        // }
+
         $schedules = $query->orderBy('date', 'desc')
             ->orderBy('start_time', 'asc')
             ->get();
 
-        // Add assignment counts to each schedule
+        // FIX 1: Update assignment counts to include 'completed' and 'no_show' statuses
         $schedules->each(function ($schedule) {
             $schedule->assigned_count = $schedule->assignments
-                ->whereIn('status', ['assigned', 'confirmed', 'completed'])
+                ->whereIn('status', ['assigned', 'confirmed', 'completed', 'no_show']) // UPDATED
                 ->count();
         });
 
@@ -84,7 +98,7 @@ class DutyScheduleController extends Controller
         // Format for FullCalendar
         $events = $schedules->map(function ($schedule) {
             $assignedCount = $schedule->assignments
-                ->whereIn('status', ['assigned', 'confirmed', 'completed'])
+                ->whereIn('status', ['assigned', 'confirmed', 'completed', 'no_show'])
                 ->count();
 
             return [
@@ -114,6 +128,25 @@ class DutyScheduleController extends Controller
         return response()->json($events);
     }
 
+
+    //     public function calendar(Request $request, Organization $organization)
+    //     {
+    // // ...
+    //         // Format for FullCalendar
+    //         $events = $schedules->map(function ($schedule) {
+    //             // FIX 1: Update assignedCount calculation to include 'completed' and 'no_show' statuses
+    //             $assignedCount = $schedule->assignments
+    //                 ->whereIn('status', ['assigned', 'confirmed', 'completed', 'no_show']) // UPDATED
+    //                 ->count();
+
+    //             return [
+    // // ...
+    //                 'required_officers' => $schedule->required_officers,
+    //                 'assigned_count' => $assignedCount,
+    //                 'assignments' => $schedule->assignments->map(function ($assignment) {
+    // // ...
+    //     }
+
     public function show(Request $request, Organization $organization, DutySchedule $dutySchedule)
     {
         // $this->authorize('viewDutySchedules', $organization);
@@ -125,8 +158,12 @@ class DutyScheduleController extends Controller
         ]);
 
         // Add assignment count
+        // $dutySchedule->assigned_count = $dutySchedule->assignments
+        //     ->whereIn('status', ['assigned', 'confirmed', 'completed'])
+        //     ->count();
+
         $dutySchedule->assigned_count = $dutySchedule->assignments
-            ->whereIn('status', ['assigned', 'confirmed', 'completed'])
+            ->whereIn('status', ['assigned', 'confirmed', 'completed', 'no_show']) // UPDATED
             ->count();
 
         return response()->json($dutySchedule);
@@ -203,6 +240,124 @@ class DutyScheduleController extends Controller
     }
 
     /**
+     * Synchronize duty assignments based on incoming officer IDs.
+     * This is required when updating a schedule to reflect changes in assigned officers.
+     */
+    private function syncOfficersOnUpdate(DutySchedule $dutySchedule, array $newOfficerIds, int $assignedBy)
+    {
+        // 1. Get current assignments (excluding declined, as they can be reassigned)
+        $currentAssignments = $dutySchedule->assignments()
+            ->whereIn('status', ['assigned', 'confirmed', 'completed', 'no_show'])
+            ->get();
+        $currentOfficerIds = $currentAssignments->pluck('officer_id')->toArray();
+
+        // 2. Identify officers to remove (present currently but not in new list)
+        $officersToRemove = array_diff($currentOfficerIds, $newOfficerIds);
+
+        // 3. Identify officers to add (in new list but not present currently)
+        $officersToAdd = array_diff($newOfficerIds, $currentOfficerIds);
+
+        // Remove old assignments
+        if (!empty($officersToRemove)) {
+            $dutySchedule->assignments()
+                ->whereIn('officer_id', $officersToRemove)
+                ->delete();
+        }
+
+        // Add new assignments
+        if (!empty($officersToAdd)) {
+            $assignmentsToCreate = collect($officersToAdd)->map(function ($officerId) use ($dutySchedule, $assignedBy) {
+                return [
+                    'duty_schedule_id' => $dutySchedule->id,
+                    'officer_id' => $officerId,
+                    'status' => 'assigned',
+                    'assigned_by' => $assignedBy,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            })->toArray();
+
+            DutyAssignment::insert($assignmentsToCreate);
+        }
+    }
+
+    /**
+     * Update duty schedule
+     */
+    // public function update(Request $request, Organization $organization, DutySchedule $dutySchedule)
+    // {
+    //     // $this->authorize('manageDutySchedules', $organization);
+
+    //     $data = $request->validate([
+    //         'title' => 'sometimes|string|max:255',
+    //         'description' => 'nullable|string',
+    //         'date' => 'sometimes|date',
+    //         'start_time' => 'sometimes|date_format:H:i,H:i:s', // UPDATED
+    //         'end_time' => 'sometimes|date_format:H:i,H:i:s',
+    //         'location' => 'nullable|string|max:255',
+    //         'required_officers' => 'sometimes|integer|min:1|max:50',
+    //         'status' => 'sometimes|in:draft,published,completed,cancelled',
+
+    //         'check_in_window_start' => 'nullable|date_format:H:i',
+    //         'check_in_window_end' => 'nullable|date_format:H:i',
+    //         'check_out_window_start' => 'nullable|date_format:H:i',
+    //         'check_out_window_end' => 'nullable|date_format:H:i',
+    //     ]);
+
+    //     // Normalize time format if needed
+    //     if (isset($data['start_time']) && strlen($data['start_time']) === 5) {
+    //         $data['start_time'] .= ':00';
+    //     }
+    //     if (isset($data['end_time']) && strlen($data['end_time']) === 5) {
+    //         $data['end_time'] .= ':00';
+    //     }
+
+    //     $originalData = $dutySchedule->only(array_keys($data));
+
+    //     $dutySchedule->update($data);
+
+    //     // Detect what changed
+    //     $changes = [];
+    //     foreach ($data as $key => $value) {
+    //         if ($originalData[$key] != $value) {
+    //             $changes[$key] = $value;
+    //         }
+    //     }
+
+    //     // Notify if significant changes
+    //     if (!empty($changes) && $dutySchedule->status !== 'draft') {
+    //         // Get all assigned officers
+    //         foreach ($dutySchedule->assignments as $assignment) {
+    //             $this->notificationService->send(
+    //                 $assignment->officer_id,
+    //                 'Duty Updated',
+    //                 "The duty '{$dutySchedule->title}' has been updated.",
+    //                 'duty.updated',
+    //                 $dutySchedule,
+    //                 "/orgs/{$organization->id}/duties/{$dutySchedule->id}",
+    //                 'normal',
+    //                 $organization->id
+    //             );
+    //         }
+    //     }
+
+    //     // Log activity
+    //     ActivityLogger::log(
+    //         $organization->id,
+    //         'duty.schedule.updated',
+    //         DutySchedule::class,
+    //         $dutySchedule->id,
+    //         ['updates' => array_keys($data)],
+    //         auth()->user()->name . ' updated duty schedule: ' . $dutySchedule->title
+    //     );
+
+    //     return response()->json($dutySchedule->load([
+    //         'assignments.officer:id,name,email,avatar,avatar_url',
+    //         'creator:id,name'
+    //     ]));
+    // }
+
+    /**
      * Update duty schedule
      */
     public function update(Request $request, Organization $organization, DutySchedule $dutySchedule)
@@ -213,11 +368,14 @@ class DutyScheduleController extends Controller
             'title' => 'sometimes|string|max:255',
             'description' => 'nullable|string',
             'date' => 'sometimes|date',
-            'start_time' => 'sometimes|date_format:H:i:s', // CHANGED: Accept H:i:s format
-            'end_time' => 'sometimes|date_format:H:i:s',
+            'start_time' => 'sometimes|date_format:H:i,H:i:s', // Accepts both H:i and H:i:s
+            'end_time' => 'sometimes|date_format:H:i,H:i:s',
             'location' => 'nullable|string|max:255',
             'required_officers' => 'sometimes|integer|min:1|max:50',
             'status' => 'sometimes|in:draft,published,completed,cancelled',
+
+            'officer_ids' => 'nullable|array', // NEW
+            'officer_ids.*' => 'exists:users,id', // NEW
 
             'check_in_window_start' => 'nullable|date_format:H:i',
             'check_in_window_end' => 'nullable|date_format:H:i',
@@ -235,18 +393,35 @@ class DutyScheduleController extends Controller
 
         $originalData = $dutySchedule->only(array_keys($data));
 
+        // Separate officer_ids from the schedule data before updating the schedule model
+        $officerIds = $data['officer_ids'] ?? null;
+        if ($officerIds !== null) {
+            $officerChanges = true;
+            unset($data['officer_ids']);
+        } else {
+            $officerChanges = false;
+        }
+
         $dutySchedule->update($data);
+
+        // FIX: Synchronize officer assignments if officer_ids were provided in the request
+        if ($officerIds !== null) {
+            $this->syncOfficersOnUpdate($dutySchedule, $officerIds, auth()->id());
+        }
 
         // Detect what changed
         $changes = [];
         foreach ($data as $key => $value) {
-            if ($originalData[$key] != $value) {
+            if (isset($originalData[$key]) && $originalData[$key] != $value) {
                 $changes[$key] = $value;
             }
         }
 
-        // Notify if significant changes
-        if (!empty($changes) && $dutySchedule->status !== 'draft') {
+        // Reload assignments for accurate notifications and response
+        $dutySchedule->load('assignments');
+
+        // Notify if significant changes (schedule details or officer list)
+        if (!empty($changes) || $officerChanges) {
             // Get all assigned officers
             foreach ($dutySchedule->assignments as $assignment) {
                 $this->notificationService->send(
