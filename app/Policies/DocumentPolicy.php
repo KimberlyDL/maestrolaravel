@@ -184,4 +184,37 @@ class DocumentPolicy
     {
         return $this->share($user, $document);
     }
+    public function viewAny(User $user)
+    {
+        // Any of the 3 levels can view
+        return $user->hasAnyPermission(['storage.view', 'storage.contribute', 'storage.manage']);
+    }
+
+    public function create(User $user)
+    {
+        // "Contribute" or "Manage" can upload
+        return $user->hasAnyPermission(['storage.contribute', 'storage.manage']);
+    }
+
+    public function delete(User $user, Document $document)
+    {
+        // "Manage" can delete ANYTHING
+        if ($user->hasPermissionTo('storage.manage')) {
+            return true;
+        }
+
+        // "Contribute" can only delete THEIR OWN files
+        if ($user->hasPermissionTo('storage.contribute') && $document->user_id === $user->id) {
+            return true;
+        }
+
+        return false;
+    }
+
+    public function share(User $user)
+    {
+        // "Contribute" or "Manage" can share
+        return $user->hasAnyPermission(['storage.contribute', 'storage.manage']);
+    }
+
 }
