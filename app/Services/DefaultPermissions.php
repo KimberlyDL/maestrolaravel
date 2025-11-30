@@ -160,10 +160,8 @@ class DefaultPermissions
             ],
             'storage' => [
                 'view_storage',
-                'upload_documents',
-                'create_folders',
-                'delete_documents',
-                'manage_document_sharing',
+                'contribute_to_storage',
+                'manage_storage_system',
             ],
             'reviews' => [
                 'create_reviews',

@@ -133,39 +133,25 @@ class PermissionSeeder extends Seeder
             // ],
 
             // Storage - Basic Member Permissions (granted on join approval)
+           // --- DOCUMENT STORAGE (Updated Groupings) ---
             [
                 'name' => 'view_storage',
-                'display_name' => 'View Storage',
-                'description' => 'View organization document storage',
+                'display_name' => 'View Documents',
+                'description' => 'Read-only access to view the organization\'s document storage, browse folders, and download files.',
                 'category' => 'storage',
             ],
             [
-                'name' => 'upload_documents',
-                'display_name' => 'Upload & Share Documents',
-                'description' => 'Upload documents, create folders, and share own documents publicly',
+                'name' => 'contribute_to_storage',
+                'display_name' => 'Contribute to Storage',
+                'description' => 'Upload new documents, create folders, share own files publicly, and delete own uploads.',
                 'category' => 'storage',
             ],
             [
-                'name' => 'create_folders',
-                'display_name' => 'Create Folders',
-                'description' => 'Create folders in document storage',
+                'name' => 'manage_storage_system',
+                'display_name' => 'Manage Storage System (Admin)',
+                'description' => 'Full administrative control to delete any member\'s documents, manage all share links, and reorganize the file system.',
                 'category' => 'storage',
             ],
-            [
-                'name' => 'delete_documents',
-                'display_name' => 'Delete Own Documents',
-                'description' => 'Delete own uploaded documents',
-                'category' => 'storage',
-            ],
-
-            // Storage - Administrative Permission (manually granted)
-            [
-                'name' => 'admin_delete_documents',
-                'display_name' => 'Delete Any Document',
-                'description' => 'Administrative permission to delete any member\'s documents',
-                'category' => 'storage',
-            ],
-
 
             // Review System
             [
@@ -236,14 +222,13 @@ class PermissionSeeder extends Seeder
             ],
         ];
 
-        foreach ($permissions as $permission) {
+foreach ($permissions as $permission) {
             DB::table('permissions')->updateOrInsert(
                 ['name' => $permission['name']],
                 array_merge($permission, [
-                    'created_at' => now(),
                     'updated_at' => now(),
                 ])
             );
-        }
+        } 
     }
 }

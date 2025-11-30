@@ -146,7 +146,7 @@ class User extends Authenticatable implements MustVerifyEmail, JWTSubject
     /**
      * Check if user has specific permission in organization
      */
-    public function hasPermission(int $organizationId, string $permission): bool
+    public function hasPermission(string $permission, int $organizationId): bool
     {
         // Admins have all permissions
         $role = $this->roleInOrg($organizationId);
