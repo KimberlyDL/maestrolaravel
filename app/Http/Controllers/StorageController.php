@@ -39,7 +39,8 @@ class StorageController extends Controller
                 'latestVersion:id,document_id,version_number,created_at,file_path',
                 'parent:id,title',
                 'organization:id,name'
-            ]);
+            ])
+            ->withCount('children');
 
         if ($folderId) {
             $query->where('parent_id', $folderId);
@@ -89,6 +90,46 @@ class StorageController extends Controller
             ],
             'breadcrumbs' => $breadcrumbs,
         ]);
+    }
+
+    /**
+     * [FIX] Missing method for Shared Documents Panel
+     * List all publicly shared documents across all organizations
+     */
+    public function publicIndex(Request $request)
+    {
+        $search = $request->input('q'); // Matches 'searchQuery' from frontend
+        $perPage = $request->input('per_page', 50);
+
+        $query = Document::where('visibility', 'public')
+            ->where('context', 'storage') // Only storage files, not review attachments
+            ->with([
+                'uploader:id,name,email',
+                'organization:id,name,logo', // Need org info for the card
+                'latestVersion:id,document_id,version_number,created_at,file_path'
+            ]);
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('title', 'like', "%{$search}%")
+                    ->orWhere('description', 'like', "%{$search}%")
+                    ->orWhereHas('organization', function ($subQ) use ($search) {
+                        $subQ->where('name', 'like', "%{$search}%");
+                    });
+            });
+        }
+
+        $query->latest();
+
+        $documents = $query->paginate($perPage);
+
+        // Transform for consistency
+        $documents->getCollection()->transform(function ($doc) {
+            $doc->file_extension = $doc->getFileExtension();
+            return $doc;
+        });
+
+        return response()->json($documents);
     }
 
     /**

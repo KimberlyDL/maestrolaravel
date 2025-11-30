@@ -81,6 +81,89 @@ class DocumentShareController extends Controller
     }
 
     /**
+     * TOGGLE SHARE METHOD (Added to fix 500 Error)
+     */
+    public function toggleShare(Request $request, string|Document $context, ?Document $document = null)
+    {
+        $doc = $this->resolveDocument($context, $document);
+        $this->authorize('share', $doc);
+
+        $share = $doc->share()->first();
+        $isSharing = false;
+
+        if (!$share) {
+            // Create new share (Enable by default)
+            $share = DocumentShare::create([
+                'document_id' => $doc->id,
+                'access_level' => 'link',
+                'created_by' => auth()->id(),
+                'share_token' => $this->generateSecureToken(),
+            ]);
+            $isSharing = true;
+        } else {
+            // Toggle existing
+            if ($share->access_level === 'org_only') {
+                // Enable
+                $share->update([
+                    'access_level' => 'link',
+                    'revoked_at' => null,
+                    'updated_by' => auth()->id(),
+                ]);
+                $isSharing = true;
+            } else {
+                // Disable
+                $share->update([
+                    'access_level' => 'org_only',
+                    'revoked_at' => now(),
+                    'revoked_by' => auth()->id(),
+                ]);
+                $isSharing = false;
+            }
+        }
+
+        // Sync Document visibility
+        $doc->update([
+            'visibility' => $isSharing ? 'public' : 'org',
+            'published_at' => $isSharing ? ($doc->published_at ?? now()) : null,
+        ]);
+
+        ActivityLogger::log(
+            $doc->organization_id,
+            'share_toggled',
+            Document::class,
+            $doc->id,
+            ['is_shared' => $isSharing],
+            auth()->user()->name . ($isSharing ? " enabled sharing for: " : " disabled sharing for: ") . $doc->title
+        );
+
+        return response()->json([
+            'message' => $isSharing ? 'Link sharing enabled' : 'Link sharing disabled',
+            'is_shared' => $isSharing,
+            'share_url' => $isSharing ? url("/share/{$share->share_token}") : null,
+            'share' => $share
+        ]);
+    }
+
+    /**
+     * GET SHARE STATUS (Added to match routes)
+     */
+    public function getShareStatus(Request $request, string|Document $context, ?Document $document = null)
+    {
+        $doc = $this->resolveDocument($context, $document);
+        // Permission check: 'view_storage' is sufficient for checking status (from routes)
+        // ensure authorize matches your policy logic, typically 'view' or 'share'
+
+        $share = $doc->share()->first();
+        $isShared = $share && $share->access_level !== 'org_only' && $share->isValid();
+
+        return response()->json([
+            'is_shared' => $isShared,
+            'share_url' => $isShared ? url("/share/{$share->share_token}") : null,
+            'access_level' => $share ? $share->access_level : 'org_only'
+        ]);
+    }
+
+    /**
      * Update share access level with comprehensive validation
      */
     public function updateShare(Request $request, string|Document $context, ?Document $document = null)
