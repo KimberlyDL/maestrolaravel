@@ -367,15 +367,15 @@ Route::middleware(['auth:api'])->group(function () {
         Route::get('/duty-assignments/me', [DutyAssignmentController::class, 'myAssignments'])
             ->middleware('org.permission:participate_in_duties');
 
-        // Availability (any member with permission)
-        Route::get('/duty-availability', [DutyAvailabilityController::class, 'index'])
-            ->middleware('org.permission:participate_in_duties');
-        Route::post('/duty-availability', [DutyAvailabilityController::class, 'store'])
-            ->middleware('org.permission:participate_in_duties');
-        Route::patch('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'update'])
-            ->middleware('org.permission:participate_in_duties');
-        Route::delete('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'destroy'])
-            ->middleware('org.permission:participate_in_duties');
+        // // Availability (any member with permission)
+        // Route::get('/duty-availability', [DutyAvailabilityController::class, 'index'])
+        //     ->middleware('org.permission:participate_in_duties');
+        // Route::post('/duty-availability', [DutyAvailabilityController::class, 'store'])
+        //     ->middleware('org.permission:participate_in_duties');
+        // Route::patch('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'update'])
+        //     ->middleware('org.permission:participate_in_duties');
+        // Route::delete('/duty-availability/{dutyAvailability}', [DutyAvailabilityController::class, 'destroy'])
+        //     ->middleware('org.permission:participate_in_duties');
 
         // Swap Requests - Member actions
         Route::get('/duty-swaps', [DutySwapController::class, 'index'])
