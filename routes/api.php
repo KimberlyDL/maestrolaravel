@@ -390,8 +390,9 @@ Route::middleware(['auth:api'])->group(function () {
             ->middleware('org.permission:participate_in_duties');
 
         // Member statistics
-        Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics'])
-            ->middleware('org.permission:participate_in_duties');
+        // Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics'])
+        //     ->middleware('org.permission:participate_in_duties');
+        Route::get('/duty-schedules/my-statistics', [DutyScheduleController::class, 'memberStatistics']);
 
         // === ADMIN ACTIONS (manage_duty_system permission) ===
 
